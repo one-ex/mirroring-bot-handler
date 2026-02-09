@@ -2,3 +2,4 @@ mirror-test.py
 venv/
 test_mirror.sh
 test_mirror_fixed.sh
+__pycache__/app.cpython-312.pyc

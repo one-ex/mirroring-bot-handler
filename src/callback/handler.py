@@ -7,8 +7,8 @@ import queue
 import time
 import logging
 from flask import Blueprint, request, jsonify # type: ignore
-from ...config import Config
-from ..telegram.handlers import jobs_data, storage_lock, format_progress_message
+from config import Config
+from src.telegram.handlers import jobs_data, storage_lock, format_progress_message
 
 bp = Blueprint('callback', __name__, url_prefix='')
 logger = logging.getLogger(__name__)
