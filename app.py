@@ -59,7 +59,11 @@ def home():
 def start_bot():
     """Start Telegram bot in thread"""
     if telegram_bot:
-        telegram_bot.start_polling()
+        try:
+            telegram_bot.start_polling()
+        except Exception as e:
+            logger.error(f"❌ Bot polling failed: {e}")
+            logger.info("🔄 Bot will retry connection...")
 
 def start_update_worker():
     """Start update worker thread"""
