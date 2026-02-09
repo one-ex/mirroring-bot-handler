@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 import logging
-from flask import Flask, jsonify
+from flask import Flask, jsonify # type: ignore
 
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

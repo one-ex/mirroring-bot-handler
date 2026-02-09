@@ -6,10 +6,10 @@ import uuid
 import threading
 import time
 import json
-import requests
+import requests # type: ignore
 import logging
 from typing import Dict, Any, Optional, List
-from telebot import types
+from telebot import types # type: ignore
 from ...config import Config
 
 logger = logging.getLogger(__name__)

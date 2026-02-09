@@ -6,7 +6,7 @@ import threading
 import queue
 import time
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify # type: ignore
 from ...config import Config
 from ..telegram.handlers import jobs_data, storage_lock, format_progress_message
 

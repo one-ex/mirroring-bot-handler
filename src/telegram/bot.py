@@ -2,7 +2,7 @@
 """
 Telegram Bot Core
 """
-import telebot
+import telebot # type: ignore
 import logging
 from typing import Dict, Optional, List
 import threading
