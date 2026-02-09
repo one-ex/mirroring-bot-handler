@@ -1,15 +1,13 @@
 services:
   - type: web
-    name: pixeldrain-mirror
+    name: telegram-proxy
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python render_pixeldrain_mirror.py
+    startCommand: python bot_proxy.py
     envVars:
-      - key: PIXELDRAIN_API_KEY
-        sync: false  # Set manually in Render dashboard
-      - key: CHUNK_SIZE_MB
-        value: 50
-      - key: MAX_FILE_SIZE_MB
-        value: 5000
-      - key: PORT
-        value: 5000
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: HF_SPACE_URL
+        value: https://one-ex-mirror-bot.hf.space
+    healthCheckPath: /health
