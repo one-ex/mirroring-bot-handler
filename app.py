@@ -8,8 +8,11 @@ import threading
 import logging
 from flask import Flask, jsonify # type: ignore
 
-# Add src to path
+# Add src to path for proper imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Also add the src directory specifically
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 from config import Config
 from src.telegram.bot import TelegramBot
