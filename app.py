@@ -59,11 +59,7 @@ def home():
 def start_bot():
     """Start Telegram bot in thread"""
     if telegram_bot:
-        try:
-            telegram_bot.start_polling()
-        except Exception as e:
-            logger.error(f"❌ Bot polling failed: {e}")
-            logger.info("🔄 Bot will retry connection...")
+        telegram_bot.start_polling()
 
 def start_update_worker():
     """Start update worker thread"""
@@ -79,6 +75,12 @@ def start_update_worker():
 if __name__ == '__main__':
     # Start update worker
     start_update_worker()
+    
+    # Start background cleanup thread
+    from src.telegram.handlers import cleanup_expired_jobs
+    cleanup_thread = threading.Thread(target=cleanup_expired_jobs, daemon=True)
+    cleanup_thread.start()
+    logger.info("🧹 Background cleanup worker started")
     
     # Start bot in background thread
     if telegram_bot:

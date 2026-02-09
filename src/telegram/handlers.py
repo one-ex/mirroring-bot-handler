@@ -10,7 +10,7 @@ import requests # type: ignore
 import logging
 from typing import Dict, Any, Optional, List
 from telebot import types # type: ignore
-from config import Config
+from ...config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 user_jobs: Dict[int, List[str]] = {}  # chat_id -> [job_ids]
 jobs_data: Dict[str, Dict] = {}       # job_id -> job_data
 storage_lock = threading.Lock()
+
+# TTL Settings - Jobs older than 24 hours will be cleaned up
+JOB_TTL_SECONDS = 24 * 3600  # 24 hours
+CLEANUP_INTERVAL = 3600  # Cleanup every hour
 
 # API Client
 class MirrorAPIClient:
@@ -178,6 +182,45 @@ def handle_mirror_command(message, bot):
         
     except Exception as e:
         bot.reply_to(message, f"❌ Error: `{str(e)}`", parse_mode='Markdown')
+
+def cleanup_expired_jobs():
+    """Background cleanup of expired jobs"""
+    while True:
+        try:
+            current_time = time.time()
+            removed_count = 0
+            
+            with storage_lock:
+                # Find expired jobs
+                expired_jobs = []
+                for job_id, job in jobs_data.items():
+                    created_at = job.get('created_at', 0)
+                    if current_time - created_at > JOB_TTL_SECONDS:
+                        expired_jobs.append(job_id)
+                
+                # Remove expired jobs
+                for job_id in expired_jobs:
+                    del jobs_data[job_id]
+                    removed_count += 1
+                
+                # Clean user_jobs references
+                for chat_id in list(user_jobs.keys()):
+                    user_jobs[chat_id] = [
+                        jid for jid in user_jobs[chat_id] 
+                        if jid in jobs_data
+                    ]
+                    if not user_jobs[chat_id]:
+                        del user_jobs[chat_id]
+            
+            if removed_count > 0:
+                logger.info(f"🧹 Cleaned up {removed_count} expired jobs")
+            
+            # Sleep until next cleanup
+            time.sleep(CLEANUP_INTERVAL)
+            
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+            time.sleep(60)  # Retry in 1 minute if error
 
 def handle_url_message(message, bot):
     """Handle direct URL message"""
@@ -348,6 +391,7 @@ def handle_jobs_command(message, bot):
                 'failed': '❌'
             }.get(status, '⏳')
             
+            job_id = job.get('job_id', 'Unknown')[:8]
             jobs_text += (
                 f"{i}. `{job_id}...` {status_emoji}\n"
                 f"   📁 {filename}\n"

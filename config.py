@@ -23,3 +23,6 @@ class Config:
     # Rate Limiting
     MESSAGES_PER_SECOND = 20
     UPDATES_PER_MINUTE = 30
+    
+    # Security
+    CALLBACK_SECRET = os.getenv("CALLBACK_SECRET", "mirror-bot-secret-key")

@@ -11,5 +11,7 @@ services:
       - key: MIRROR_API_URL
         value: https://one-ex-mirroring-handler.hf.space/api/v1
       - key: BOT_CALLBACK_URL
+        sync: false
+      - key: CALLBACK_SECRET
         generateValue: true
     healthCheckPath: /health

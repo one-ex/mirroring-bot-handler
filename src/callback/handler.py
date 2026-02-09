@@ -7,8 +7,8 @@ import queue
 import time
 import logging
 from flask import Blueprint, request, jsonify # type: ignore
-from config import Config
-from src.telegram.handlers import jobs_data, storage_lock, format_progress_message
+from ...config import Config
+from ..telegram.handlers import jobs_data, storage_lock, format_progress_message
 
 bp = Blueprint('callback', __name__, url_prefix='')
 logger = logging.getLogger(__name__)
@@ -42,10 +42,33 @@ def update_worker(bot_instance):
         except Exception as e:
             logger.error(f"Update worker error: {e}")
 
+def verify_callback_signature(job_id: str, signature: str) -> bool:
+    """Verify callback signature for security"""
+    try:
+        import hmac
+        import hashlib
+        
+        expected = hmac.new(
+            Config.CALLBACK_SECRET.encode(),
+            job_id.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        return hmac.compare_digest(expected, signature)
+    except Exception as e:
+        logger.error(f"Signature verification error: {e}")
+        return False
+
 @bp.route('/callback/<job_id>', methods=['POST'])
 def handle_progress_callback(job_id):
     """Handle progress callback from Mirroring Handler"""
     try:
+        # Optional: Verify signature if provided
+        signature = request.headers.get('X-Callback-Signature', '')
+        if signature and not verify_callback_signature(job_id, signature):
+            logger.warning(f"Invalid callback signature for job {job_id}")
+            return jsonify({'success': False, 'error': 'Invalid signature'}), 401
+        
         data = request.json
         logger.info(f"📨 Callback for {job_id}: {data.get('status')} {data.get('progress', 0)}%")
         

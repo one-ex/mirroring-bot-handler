@@ -104,18 +104,4 @@ class TelegramBot:
     def start_polling(self):
         """Start bot polling"""
         logger.info("🤖 Starting Telegram bot polling...")
-        # Remove webhook if exists
-        try:
-            self.bot.remove_webhook()
-            logger.info("✅ Webhook removed successfully")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to remove webhook: {e}")
-        
-        # Start polling with error handling
-        try:
-            self.bot.infinity_polling(timeout=30, long_polling_timeout=30)
-        except Exception as e:
-            logger.error(f"❌ Polling error: {e}")
-            logger.info("🔄 Retrying in 5 seconds...")
-            time.sleep(5)
-            self.start_polling()  # Retry
+        self.bot.infinity_polling()

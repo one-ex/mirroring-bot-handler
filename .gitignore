@@ -3,3 +3,10 @@ venv/
 test_mirror.sh
 test_mirror_fixed.sh
 __pycache__/app.cpython-312.pyc
+src/__pycache__/__init__.cpython-312.pyc
+src/callback/__pycache__/__init__.cpython-312.pyc
+src/telegram/__pycache__/bot.cpython-312.pyc
+src/telegram/__pycache__/handlers.cpython-312.pyc
+src/telegram/__pycache__/__init__.cpython-312.pyc
+src/callback/__pycache__/handler.cpython-312.pyc
+__pycache__/config.cpython-312.pyc
