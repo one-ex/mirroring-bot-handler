@@ -9,7 +9,7 @@ services:
       - key: TELEGRAM_TOKEN
         sync: false
       - key: MIRROR_API_URL
-        value: https://your-username-mirroring-handler.hf.space/api/v1
+        value: https://one-ex-mirroring-handler.hf.space/api/v1
       - key: BOT_CALLBACK_URL
         generateValue: true
     healthCheckPath: /health
