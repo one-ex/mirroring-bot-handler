@@ -101,7 +101,45 @@ class TelegramBot:
             logger.error(f"Unexpected error editing message: {e}")
             return False
     
-    def start_polling(self):
-        """Start bot polling"""
-        logger.info("🤖 Starting Telegram bot polling...")
-        self.bot.infinity_polling()
+    def process_update(self, update_data: Dict) -> bool:
+        """Process webhook update from Telegram"""
+        try:
+            # Convert dict to Update object
+            update = telebot.types.Update.de_json(update_data)
+            if update:
+                self.bot.process_new_updates([update])
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error processing webhook update: {e}")
+            return False
+    
+    def setup_webhook(self, webhook_url: str) -> bool:
+        """Setup webhook URL with Telegram"""
+        try:
+            logger.info(f"🔄 Setting up webhook: {webhook_url}")
+            result = self.bot.set_webhook(url=webhook_url)
+            if result:
+                logger.info("✅ Webhook setup successful")
+                return True
+            else:
+                logger.error("❌ Webhook setup failed")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error setting up webhook: {e}")
+            return False
+    
+    def remove_webhook(self) -> bool:
+        """Remove webhook from Telegram"""
+        try:
+            logger.info("🔄 Removing webhook...")
+            result = self.bot.remove_webhook()
+            if result:
+                logger.info("✅ Webhook removed successfully")
+                return True
+            else:
+                logger.error("❌ Failed to remove webhook")
+                return False
+        except Exception as e:
+            logger.error(f"❌ Error removing webhook: {e}")
+            return False
