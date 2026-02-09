@@ -1,13 +1,15 @@
 services:
   - type: web
-    name: telegram-proxy
+    name: telegram-mirror-bot
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python bot_proxy.py
+    startCommand: python app.py
     envVars:
       - key: TELEGRAM_TOKEN
         sync: false
-      - key: HF_SPACE_URL
-        value: https://one-ex-mirror-bot.hf.space
+      - key: MIRROR_API_URL
+        value: https://your-username-mirroring-handler.hf.space/api/v1
+      - key: BOT_CALLBACK_URL
+        generateValue: true
     healthCheckPath: /health
