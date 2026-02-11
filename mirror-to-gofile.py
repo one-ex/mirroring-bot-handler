@@ -37,9 +37,7 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
         'start_time': time.time()
     }
     
-    session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-    
+    session = requests.Session()    
     # Daftar server regional Asia
     regional_servers = [
         "upload-ap-sgp.gofile.io",  # Singapore
