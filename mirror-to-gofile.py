@@ -10,6 +10,7 @@ import threading
 import queue
 import re
 import logging
+import io
 
 # ==================== KONFIGURASI LOGGING ====================
 # Setup logging ke STDOUT agar Render bisa melihatnya
@@ -24,6 +25,75 @@ logger = logging.getLogger(__name__)
 upload_queue = queue.Queue()
 # Global dict untuk menyimpan status
 upload_status = {}
+
+def test_gofile_server_speed(server, dummy_file_size_mb=1, timeout=15):
+    """
+    Test kecepatan upload server GoFile dengan file dummy
+    """
+    session = requests.Session()
+    dummy_file_size_bytes = dummy_file_size_mb * 1024 * 1024
+    dummy_file_data = io.BytesIO(b'\0' * dummy_file_size_bytes)
+    dummy_filename = "dummy_test_file.bin"
+    
+    fields = {'file': (dummy_filename, dummy_file_data, 'application/octet-stream')}
+    encoder = MultipartEncoder(fields=fields)
+    
+    upload_url = f"https://{server}/contents/uploadfile"
+    start_test_time = time.time()
+    
+    try:
+        test_res = session.post(
+            upload_url,
+            data=encoder,
+            headers={'Content-Type': encoder.content_type},
+            timeout=timeout
+        )
+        test_res.raise_for_status()
+        end_test_time = time.time()
+        duration = end_test_time - start_test_time
+        
+        if duration > 0:
+            speed = (dummy_file_size_bytes / duration) / (1024 * 1024)  # MB/s
+            return speed
+        else:
+            return 0.0
+    except Exception:
+        return -1.0  # Gagal
+    finally:
+        session.close()
+
+def find_fastest_gofile_server(regional_servers, request_id):
+    """
+    Cari server tercepat dari daftar server regional
+    """
+    logger.info(f"[{request_id}] 🔍 Testing server speeds with 1MB dummy file...")
+    
+    server_speeds = {}
+    for server in regional_servers:
+        logger.info(f"[{request_id}] Testing {server}...")
+        speed = test_gofile_server_speed(server)
+        server_speeds[server] = speed
+        
+        if speed > 0:
+            logger.info(f"[{request_id}]   ✓ Speed: {speed:.2f} MB/s")
+        else:
+            logger.info(f"[{request_id}]   ✗ Failed")
+    
+    # Cari server tercepat
+    fastest_server = None
+    max_speed = -1.0
+    
+    for server, speed in server_speeds.items():
+        if speed > max_speed:
+            max_speed = speed
+            fastest_server = server
+    
+    if fastest_server and max_speed > 0:
+        logger.info(f"[{request_id}] 🚀 Fastest server: {fastest_server} ({max_speed:.2f} MB/s)")
+        return [fastest_server]  # Gunakan hanya server tercepat
+    else:
+        logger.warning(f"[{request_id}] ⚠️ Could not determine fastest server, using all servers")
+        return regional_servers  # Fallback ke semua server
 
 def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
     """
@@ -48,6 +118,10 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
     
     logger.info(f"🚀 MIRRORING STARTED - ID: {request_id}")
     logger.info(f"📁 URL: {sf_url}")
+    
+    # TEST KECEPATAN SERVER - Tambahkan ini sebelum download
+    upload_status[request_id]['message'] = 'Testing server speeds...'
+    servers_to_use = find_fastest_gofile_server(regional_servers, request_id)
     
     # 1. Koneksi ke Sourceforge
     try:
@@ -84,10 +158,10 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
         }
         return
     
-    # 2. Loop Mencoba Server Regional
-    for idx, server in enumerate(regional_servers, 1):
-        upload_status[request_id]['message'] = f'Trying server {idx}/{len(regional_servers)}: {server}'
-        logger.info(f"[{request_id}] Trying server {idx}/{len(regional_servers)}: {server}")
+    # 2. Loop Mencoba Server (gunakan servers_to_use yang sudah ditest)
+    for idx, server in enumerate(servers_to_use, 1):
+        upload_status[request_id]['message'] = f'Trying server {idx}/{len(servers_to_use)}: {server}'
+        logger.info(f"[{request_id}] Trying server {idx}/{len(servers_to_use)}: {server}")
         
         # Reset stream untuk server baru
         try:
@@ -163,7 +237,8 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
                         'admin_code': res.get('data', {}).get('adminCode'),
                         'file_name': filename,
                         'file_size_mb': total_size/(1024**2) if total_size > 0 else 0,
-                        'timestamp': time.time()
+                        'timestamp': time.time(),
+                        'server_tested': len(servers_to_use) < len(regional_servers)  # True jika hanya server tercepat yang digunakan
                     }
                     
                     upload_status[request_id] = result
@@ -191,12 +266,13 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
             pass
     
     # Jika semua server gagal
-    error_msg = "All regional servers failed"
+    error_msg = f"All {'tested ' if len(servers_to_use) < len(regional_servers) else ''}servers failed"
     logger.error(f"[{request_id}] ❌ {error_msg}")
     upload_status[request_id] = {
         'status': 'error',
         'message': error_msg,
-        'end_time': time.time()
+        'end_time': time.time(),
+        'servers_tested': len(servers_to_use) < len(regional_servers)
     }
 
 class MirrorHandler(BaseHTTPRequestHandler):
