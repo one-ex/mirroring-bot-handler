@@ -4,20 +4,41 @@ import time
 import sys
 import json
 from requests_toolbelt.multipart.encoder import MultipartEncoder, MultipartEncoderMonitor
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 import queue
 import re
+import logging
+
+# ==================== KONFIGURASI LOGGING ====================
+# Setup logging ke STDOUT agar Render bisa melihatnya
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # Global queue untuk hasil upload
 upload_queue = queue.Queue()
+# Global dict untuk menyimpan status
+upload_status = {}
 
 def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
     """
     Mirror SourceForge ke GoFile dengan multi-server regional
     """
+    # Update status
+    upload_status[request_id] = {
+        'status': 'processing',
+        'progress': 0,
+        'message': 'Starting download from SourceForge...',
+        'start_time': time.time()
+    }
+    
     session = requests.Session()
+    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
     
     # Daftar server regional Asia
     regional_servers = [
@@ -27,170 +48,164 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
         "upload.gofile.io"          # Automatic Fallback
     ]
     
-    log_messages = []
-    
-    def add_log(msg):
-        log_messages.append(msg)
-        print(msg)
-    
-    add_log("=" * 60)
-    add_log("🚀 MIRRORING: SourceForge → GoFile (FAST MODE)")
-    add_log(f"📁 Request ID: {request_id}")
-    add_log("=" * 60)
+    logger.info(f"🚀 MIRRORING STARTED - ID: {request_id}")
+    logger.info(f"📁 URL: {sf_url}")
     
     # 1. Koneksi ke Sourceforge
-    add_log("[*] Menghubungkan ke Sourceforge...")
     try:
-        sf_res = session.get(sf_url, stream=True, allow_redirects=True, timeout=30)
+        upload_status[request_id]['message'] = 'Connecting to SourceForge...'
+        logger.info(f"[{request_id}] Connecting to SourceForge...")
+        
+        sf_res = session.get(sf_url, stream=True, allow_redirects=True, timeout=60)
         sf_res.raise_for_status()
         
         total_size = int(sf_res.headers.get('content-length', 0))
+        if total_size == 0:
+            logger.warning(f"[{request_id}] Content-Length header missing or zero")
+        
         filename = os.path.basename(urlparse(sf_res.url).path.replace('/download', ''))
-        if not filename:
+        if not filename or filename == '/':
             filename = "mirrored_file.zip"
         
-        add_log(f"[*] File   : {filename}")
-        add_log(f"[*] Ukuran : {total_size/(1024**2):.2f} MB")
-        add_log(f"[*] Servers: {len(regional_servers)} regional")
-        add_log("-" * 50)
+        upload_status[request_id].update({
+            'file_name': filename,
+            'file_size': total_size,
+            'file_size_mb': total_size/(1024**2) if total_size > 0 else 0
+        })
+        
+        logger.info(f"[{request_id}] File: {filename}")
+        logger.info(f"[{request_id}] Size: {total_size/(1024**2):.2f} MB" if total_size > 0 else "[{request_id}] Size: Unknown")
         
     except Exception as e:
-        error_msg = f"[!] Gagal akses Sourceforge: {e}"
-        add_log(error_msg)
-        upload_queue.put({
-            'request_id': request_id,
+        error_msg = f"Failed to access SourceForge: {e}"
+        logger.error(f"[{request_id}] {error_msg}")
+        upload_status[request_id] = {
             'status': 'error',
             'message': error_msg,
-            'logs': log_messages
-        })
+            'end_time': time.time()
+        }
         return
     
     # 2. Loop Mencoba Server Regional
-    success = False
-    result = None
-    
     for idx, server in enumerate(regional_servers, 1):
-        add_log(f"\n[{idx}/{len(regional_servers)}] Mencoba server: {server}")
+        upload_status[request_id]['message'] = f'Trying server {idx}/{len(regional_servers)}: {server}'
+        logger.info(f"[{request_id}] Trying server {idx}/{len(regional_servers)}: {server}")
         
         # Reset stream untuk server baru
         try:
-            sf_res = session.get(sf_url, stream=True, allow_redirects=True, timeout=30)
+            sf_res = session.get(sf_url, stream=True, allow_redirects=True, timeout=60)
             stream_data = sf_res.raw
-            setattr(stream_data, 'len', total_size)
+            if total_size > 0:
+                setattr(stream_data, 'len', total_size)
         except Exception as e:
-            add_log(f"[!] Gagal reset stream: {e}")
+            logger.error(f"[{request_id}] Failed to reset stream: {e}")
             continue
         
-        fields = {'file': (filename, stream_data, 'application/octet-stream')}
-        if token:
-            fields['token'] = token
-        
-        encoder = MultipartEncoder(fields=fields)
-        
-        # VARIABEL UNTUK PROGRESS YANG OPTIMAL
-        start_time = time.time()
-        last_print_time = start_time
-        last_percent = 0
-        last_speed_update = start_time
-        
-        progress_logs = []
-        
-        # FUNGSI PROGRESS YANG CEPAT
-        def progress_callback(monitor):
-            nonlocal last_print_time, last_percent, last_speed_update
-            
-            current = monitor.bytes_read
-            current_time = time.time()
-            
-            # Hitung persentase
-            percent = (current / total_size) * 100 if total_size > 0 else 0
-            
-            # OPTIMASI: Hanya update jika:
-            # 1. Persentase naik >= 0.5%, ATAU
-            # 2. Sudah 1 detik sejak update terakhir
-            if percent - last_percent >= 0.5 or current_time - last_print_time >= 1:
-                elapsed = current_time - start_time
-                speed = current / elapsed / (1024 * 1024) if elapsed > 0 else 0
-                
-                # Buat progress bar manual yang RAPI
-                bar_length = 40
-                filled_length = int(bar_length * percent / 100)
-                bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                
-                # Format yang clean
-                progress_msg = f"  [{bar}] {percent:5.1f}% | {speed:5.1f} MB/s | {elapsed:4.0f}s"
-                progress_logs.append(progress_msg)
-                
-                last_percent = percent
-                last_print_time = current_time
-        
-        monitor = MultipartEncoderMonitor(encoder, progress_callback)
-        
+        # Persiapan upload
         try:
-            upload_url = f"https://{server}/contents/uploadfile"
+            fields = {'file': (filename, stream_data, 'application/octet-stream')}
+            if token and token.strip():
+                fields['token'] = token.strip()
             
-            # TIMEOUT SAMA seperti script asli (30 detik untuk deteksi server)
+            encoder = MultipartEncoder(fields=fields)
+            
+            # Progress tracking
+            start_time = time.time()
+            last_update_time = start_time
+            
+            def progress_callback(monitor):
+                current = monitor.bytes_read
+                current_time = time.time()
+                
+                if total_size > 0:
+                    percent = (current / total_size) * 100
+                    # Update setiap 1 detik atau setiap 5% progress
+                    if current_time - last_update_time >= 1 or percent - upload_status[request_id].get('progress', 0) >= 5:
+                        elapsed = current_time - start_time
+                        speed = current / elapsed / (1024 * 1024) if elapsed > 0 else 0
+                        
+                        upload_status[request_id].update({
+                            'progress': percent,
+                            'message': f'Uploading: {percent:.1f}% ({speed:.1f} MB/s)',
+                            'current_speed': speed,
+                            'elapsed_time': elapsed
+                        })
+                        
+                        logger.info(f"[{request_id}] Progress: {percent:.1f}% | Speed: {speed:.1f} MB/s")
+            
+            monitor = MultipartEncoderMonitor(encoder, progress_callback)
+            
+            # Upload ke GoFile
+            upload_url = f"https://{server}/contents/uploadfile"
+            logger.info(f"[{request_id}] Uploading to {upload_url}...")
+            
             up_res = session.post(
                 upload_url,
                 data=monitor,
                 headers={'Content-Type': monitor.content_type},
-                timeout=30
+                timeout=300  # Timeout 5 menit untuk upload
             )
             
             if up_res.status_code == 200:
                 res = up_res.json()
-                if res['status'] == 'ok':
-                    # Hitung statistik akhir
+                logger.info(f"[{request_id}] Server response: {res}")
+                
+                if res.get('status') == 'ok':
                     end_time = time.time()
                     total_time = end_time - start_time
-                    avg_speed = total_size / total_time / (1024 * 1024) if total_time > 0 else 0
+                    avg_speed = total_size / total_time / (1024 * 1024) if total_time > 0 and total_size > 0 else 0
                     
-                    add_log(f"\n✅ BERHASIL via {server}!")
-                    add_log(f"⏱️  Waktu: {total_time:.1f} detik")
-                    add_log(f"🚀 Speed: {avg_speed:.1f} MB/s")
-                    add_log(f"🔗 Link: {res['data'].get('downloadPage', 'N/A')}")
-                    
-                    success = True
                     result = {
                         'status': 'success',
                         'server': server,
                         'time_seconds': total_time,
                         'speed_mbps': avg_speed,
-                        'download_page': res['data'].get('downloadPage'),
-                        'direct_download': res['data'].get('directLink'),
+                        'download_page': res.get('data', {}).get('downloadPage'),
+                        'code': res.get('data', {}).get('code'),
+                        'admin_code': res.get('data', {}).get('adminCode'),
                         'file_name': filename,
-                        'file_size_mb': total_size/(1024**2)
+                        'file_size_mb': total_size/(1024**2) if total_size > 0 else 0,
+                        'timestamp': time.time()
                     }
-                    break
+                    
+                    upload_status[request_id] = result
+                    logger.info(f"[{request_id}] ✅ SUCCESS! Download page: {result.get('download_page')}")
+                    
+                    # Cleanup
+                    sf_res.close()
+                    return
                 else:
-                    add_log(f"\n[!] Server {server} menolak: {res.get('data', {}).get('message', 'Unknown error')}")
+                    error_msg = res.get('data', {}).get('message', 'Unknown error from GoFile')
+                    logger.warning(f"[{request_id}] Server {server} rejected: {error_msg}")
             else:
-                add_log(f"\n[!] Server {server} error HTTP {up_res.status_code}")
+                logger.warning(f"[{request_id}] Server {server} HTTP {up_res.status_code}: {up_res.text}")
                 
+        except requests.exceptions.Timeout:
+            logger.error(f"[{request_id}] Timeout connecting to {server}")
+            upload_status[request_id]['message'] = f'Timeout on server {server}'
         except Exception as e:
-            add_log(f"\n[!] Gagal terhubung ke {server}: {str(e)}")
-            continue
+            logger.error(f"[{request_id}] Error with server {server}: {str(e)}")
+        
+        # Cleanup sebelum coba server berikutnya
+        try:
+            sf_res.close()
+        except:
+            pass
     
-    # Tutup koneksi
-    sf_res.close()
-    
-    # Kirim hasil ke queue
-    if success:
-        upload_queue.put({
-            'request_id': request_id,
-            'status': 'success',
-            'result': result,
-            'logs': log_messages + progress_logs
-        })
-    else:
-        upload_queue.put({
-            'request_id': request_id,
-            'status': 'error',
-            'message': 'Semua server regional tidak dapat diakses',
-            'logs': log_messages
-        })
+    # Jika semua server gagal
+    error_msg = "All regional servers failed"
+    logger.error(f"[{request_id}] ❌ {error_msg}")
+    upload_status[request_id] = {
+        'status': 'error',
+        'message': error_msg,
+        'end_time': time.time()
+    }
 
 class MirrorHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # Custom log format
+        logger.info(f"HTTP {self.address_string()} - {format%args}")
+    
     def do_GET(self):
         if self.path == '/':
             self.send_response(200)
@@ -199,47 +214,12 @@ class MirrorHandler(BaseHTTPRequestHandler):
             html = """
             <!DOCTYPE html>
             <html>
-            <head>
-                <title>GoFile Mirror API</title>
-                <style>
-                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                    .endpoint { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
-                    code { background: #eaeaea; padding: 2px 5px; border-radius: 3px; }
-                </style>
-            </head>
+            <head><title>GoFile Mirror API</title></head>
             <body>
-                <h1>🚀 GoFile Mirror API</h1>
-                <p>API untuk mirroring file dari SourceForge ke GoFile</p>
-                
-                <div class="endpoint">
-                    <h3>📤 POST /mirror</h3>
-                    <p>Mirror file dari SourceForge ke GoFile</p>
-                    <p><strong>Parameters:</strong></p>
-                    <ul>
-                        <li><code>url</code>: URL SourceForge (required)</li>
-                        <li><code>token</code>: GoFile token (optional)</li>
-                        <li><code>async</code>: true/false (default: true)</li>
-                    </ul>
-                    <p><strong>Contoh CURL:</strong></p>
-                    <code>
-                    curl -X POST "https://your-app.onrender.com/mirror" \
-                         -H "Content-Type: application/json" \
-                         -d '{"url": "https://sourceforge.net/projects/...", "token": "your_token"}'
-                    </code>
-                </div>
-                
-                <div class="endpoint">
-                    <h3>📋 GET /status/{request_id}</h3>
-                    <p>Cek status mirroring</p>
-                    <p><strong>Contoh:</strong></p>
-                    <code>GET https://your-app.onrender.com/status/12345</code>
-                </div>
-                
-                <div class="endpoint">
-                    <h3>📊 GET /stats</h3>
-                    <p>Status server</p>
-                    <code>GET https://your-app.onrender.com/stats</code>
-                </div>
+                <h1>🚀 GoFile Mirror API is Running!</h1>
+                <p>✅ Server is online and ready to mirror files.</p>
+                <p>Use <code>POST /mirror</code> endpoint to start mirroring.</p>
+                <p><a href="/stats">View server stats</a></p>
             </body>
             </html>
             """
@@ -247,29 +227,34 @@ class MirrorHandler(BaseHTTPRequestHandler):
             
         elif self.path.startswith('/status/'):
             request_id = self.path.split('/')[-1]
-            # Cek di queue jika masih dalam proses
-            # Untuk simplicity, kita return status simple
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            response = {
-                'request_id': request_id,
-                'status': 'completed',
-                'message': 'Gunakan endpoint POST /mirror untuk memulai mirroring'
-            }
-            self.wfile.write(json.dumps(response).encode())
+            
+            status = upload_status.get(request_id, {'status': 'not_found', 'message': 'Request ID not found'})
+            self.wfile.write(json.dumps(status, indent=2).encode())
             
         elif self.path == '/stats':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
-            response = {
+            
+            stats = {
                 'status': 'online',
                 'service': 'GoFile Mirror API',
-                'version': '1.0',
-                'timestamp': time.time()
+                'timestamp': time.time(),
+                'active_uploads': len([s for s in upload_status.values() if s.get('status') == 'processing']),
+                'total_processed': len(upload_status),
+                'recent_requests': list(upload_status.keys())[-10:]  # 10 terakhir
             }
-            self.wfile.write(json.dumps(response).encode())
+            self.wfile.write(json.dumps(stats, indent=2).encode())
+            
+        elif self.path == '/health':
+            # Simple health check untuk Render
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'status': 'healthy', 'timestamp': time.time()}).encode())
             
         else:
             self.send_response(404)
@@ -279,13 +264,20 @@ class MirrorHandler(BaseHTTPRequestHandler):
     
     def do_POST(self):
         if self.path == '/mirror':
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-            
             try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length == 0:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'error': 'Empty request body'}).encode())
+                    return
+                
+                post_data = self.rfile.read(content_length)
                 data = json.loads(post_data.decode('utf-8'))
-                sf_url = data.get('url')
-                token = data.get('token')
+                
+                sf_url = data.get('url', '').strip()
+                token = data.get('token', '').strip()
                 async_mode = data.get('async', True)
                 
                 if not sf_url:
@@ -296,7 +288,7 @@ class MirrorHandler(BaseHTTPRequestHandler):
                     return
                 
                 # Validasi URL SourceForge
-                if not re.match(r'^https://sourceforge\.net/projects/.+/files/.+', sf_url):
+                if not re.match(r'^https://sourceforge\.net/projects/.+', sf_url):
                     self.send_response(400)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -304,7 +296,9 @@ class MirrorHandler(BaseHTTPRequestHandler):
                     return
                 
                 # Generate request ID
-                request_id = str(int(time.time()))
+                request_id = str(int(time.time() * 1000))  # Gunakan milliseconds untuk uniqueness
+                
+                logger.info(f"📨 NEW REQUEST - ID: {request_id}, URL: {sf_url[:50]}..., Async: {async_mode}")
                 
                 if async_mode:
                     # Jalankan di thread terpisah
@@ -322,65 +316,34 @@ class MirrorHandler(BaseHTTPRequestHandler):
                         'status': 'processing',
                         'request_id': request_id,
                         'message': 'Mirroring started in background',
-                        'check_status': f'/status/{request_id}',
-                        'url': sf_url
+                        'check_status_url': f'/status/{request_id}',
+                        'url': sf_url,
+                        'note': 'Check /status/{request_id} for progress and result'
                     }
-                    self.wfile.write(json.dumps(response).encode())
+                    self.wfile.write(json.dumps(response, indent=2).encode())
                 else:
-                    # Sync mode (tidak direkomendasikan untuk file besar)
-                    # Simpan logs untuk dikembalikan
-                    import io
-                    from contextlib import redirect_stdout
+                    # Sync mode - TIDAK DISARANKAN untuk file besar
+                    # Hanya untuk file kecil atau testing
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'error': 'Sync mode disabled',
+                        'message': 'Use async:true for file mirroring',
+                        'request_id': request_id
+                    }).encode())
                     
-                    f = io.StringIO()
-                    with redirect_stdout(f):
-                        result_queue = queue.Queue()
-                        def sync_mirror():
-                            mirror_gofile_regional_fast(sf_url, token, request_id)
-                            # Ambil hasil dari queue
-                            result = upload_queue.get()
-                            result_queue.put(result)
-                        
-                        thread = threading.Thread(target=sync_mirror, daemon=True)
-                        thread.start()
-                        thread.join(timeout=300)  # Timeout 5 menit
-                        
-                        if thread.is_alive():
-                            self.send_response(408)
-                            self.send_header('Content-Type', 'application/json')
-                            self.end_headers()
-                            self.wfile.write(json.dumps({
-                                'error': 'Request timeout',
-                                'request_id': request_id
-                            }).encode())
-                            return
-                        
-                        result = result_queue.get()
-                    
-                    if result['status'] == 'success':
-                        self.send_response(200)
-                        self.send_header('Content-Type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps(result['result']).encode())
-                    else:
-                        self.send_response(500)
-                        self.send_header('Content-Type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps({
-                            'error': result.get('message', 'Mirroring failed'),
-                            'request_id': request_id
-                        }).encode())
-                        
             except json.JSONDecodeError:
                 self.send_response(400)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'error': 'Invalid JSON'}).encode())
+                self.wfile.write(json.dumps({'error': 'Invalid JSON format'}).encode())
             except Exception as e:
+                logger.error(f"Error in POST /mirror: {e}")
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'error': str(e)}).encode())
+                self.wfile.write(json.dumps({'error': f'Server error: {str(e)}'}).encode())
         else:
             self.send_response(404)
             self.send_header('Content-Type', 'application/json')
@@ -389,28 +352,16 @@ class MirrorHandler(BaseHTTPRequestHandler):
 
 def run_server(port=8000):
     server = HTTPServer(('0.0.0.0', port), MirrorHandler)
-    print(f"🚀 Server running on port {port}")
-    print(f"📡 Access at: http://localhost:{port}")
-    print(f"🌐 Untuk production: https://your-app.onrender.com")
+    logger.info(f"🚀 Server running on port {port}")
+    logger.info(f"📡 Available endpoints:")
+    logger.info(f"   GET  /          - Web interface")
+    logger.info(f"   POST /mirror    - Start mirroring")
+    logger.info(f"   GET  /status/:id - Check status")
+    logger.info(f"   GET  /stats     - Server statistics")
+    logger.info(f"   GET  /health    - Health check")
     server.serve_forever()
 
 if __name__ == "__main__":
-    # Cek apakah ingin menjalankan langsung atau via server
-    if len(sys.argv) > 1 and sys.argv[1] == '--direct':
-        # Mode langsung (seperti script asli)
-        SF_LINK = "https://sourceforge.net/projects/alphadroid-project/files/marble/AlphaDroid-16-20260122_172732-vanilla-marble-v4.2.zip"
-        
-        print("🎯 Konfigurasi Mirroring (Fast Mode)")
-        print(f"URL: {SF_LINK[:80]}...")
-        print()
-        
-        # Jalankan dan ukur waktu
-        start_total = time.time()
-        mirror_gofile_regional_fast(SF_LINK, request_id="direct-run")
-        end_total = time.time()
-        
-        print(f"\n⏱️  Total execution time: {end_total - start_total:.1f} detik")
-    else:
-        # Jalankan server web untuk Render.com
-        port = int(os.environ.get('PORT', 8000))
-        run_server(port)
+    # Selalu jalankan server mode untuk Render
+    port = int(os.environ.get('PORT', 8000))
+    run_server(port)
