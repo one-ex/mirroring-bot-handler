@@ -113,7 +113,10 @@ def mirror_gofile_regional_fast(sf_url, token=None, request_id="default"):
         "upload-ap-sgp.gofile.io",  # Singapore
         "upload-ap-hkg.gofile.io",  # Hong Kong
         "upload-ap-tyo.gofile.io",  # Tokyo
-        "upload.gofile.io"          # Automatic Fallback
+    #   "upload.gofile.io",         # Automatic Fallback
+        "upload-na-phx.gofile.io",  # Phoenix U.S
+        "upload-na-nyc.gofile.io",  # New York City
+        "upload-sa-sao.gofile.io"   # São Paulo
     ]
     
     logger.info(f"🚀 MIRRORING STARTED - ID: {request_id}")
