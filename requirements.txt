@@ -1,2 +1,6 @@
-requests>=2.31.0
-requests-toolbelt>=1.0.0
+# Daftar library Python yang dibutuhkan oleh bot
+
+python-telegram-bot==20.3
+requests
+google-api-python-client
+google-auth-oauthlib
