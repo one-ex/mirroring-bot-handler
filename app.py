@@ -19,11 +19,25 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
-HF_MIRROR_API_URL = os.environ.get('HF_MIRROR_API_URL') # e.g., https://username-repo.hf.space
-HF_MIRROR_API_KEY = os.environ.get('HF_MIRROR_API_KEY')
 
-# Untuk Device Flow
-SCOPES = ['https://www.googleapis.com/auth/drive']
+# URL dan Kunci API untuk setiap worker di Hugging Face
+WORKER_CONFIG = {
+    'gdrive': {
+        'url': os.environ.get('HF_GDRIVE_URL'),
+        'api_key': os.environ.get('HF_GDRIVE_API_KEY')
+    },
+    'pixeldrain': {
+        'url': os.environ.get('HF_PIXELDRAIN_URL'),
+        'api_key': os.environ.get('HF_PIXELDRAIN_API_KEY')
+    },
+    'gofile': {
+        'url': os.environ.get('HF_GOFILE_URL'),
+        'api_key': os.environ.get('HF_GOFILE_API_KEY')
+    }
+}
+
+# Untuk Google Device Flow
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 DEVICE_AUTH_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
