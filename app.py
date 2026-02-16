@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import requests
+import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -307,6 +308,11 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_mirroring_process(update, context, worker_name, file_url, creds)
 
 
+def strip_ansi_codes(text: str) -> str:
+    """Menghapus ANSI escape codes dari teks."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
 async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_TYPE, worker_name: str, file_url: str, creds: Credentials | None):
     """Memanggil endpoint /mirror-progress secara langsung untuk memulai dan stream progres."""
     chat_id = update.effective_chat.id
@@ -337,23 +343,37 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
         with requests.post(f"{api_url}/mirror-progress", headers=headers, json=params, stream=True) as r:
             r.raise_for_status()
             
-            last_message_content = ""
-            # Pesan awal untuk memberitahu user bahwa proses sedang berjalan
+            last_update_time = 0
+            full_progress_text = ""
+            last_sent_text = ""
+
             await progress_message.edit_text(f"✅ Berhasil terhubung. Memulai stream progres dari '{worker_name}'...")
 
             for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
-                if chunk and chunk != last_message_content:
-                    try:
-                        # Gabungkan header dan konten progres dalam satu pesan
-                        display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{chunk}</pre>"
-                        await progress_message.edit_text(display_text, parse_mode='HTML')
-                        last_message_content = chunk
-                        await asyncio.sleep(1.5) # Jeda untuk menghindari rate limit
-                    except Exception as e:
-                        # Bisa jadi error karena pesan tidak berubah, abaikan saja
-                        if 'Message is not modified' not in str(e):
-                            logger.warning(f"Gagal mengedit pesan progres: {e}")
-    
+                if chunk:
+                    # Bersihkan dan gabungkan chunk
+                    cleaned_chunk = strip_ansi_codes(chunk)
+                    full_progress_text += cleaned_chunk
+                    
+                    current_time = asyncio.get_event_loop().time()
+                    # Terapkan throttling: update setiap 1.5 detik
+                    if (current_time - last_update_time) >0.1:
+                        # Hanya kirim jika ada perubahan
+                        if full_progress_text != last_sent_text:
+                            try:
+                                display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{full_progress_text}</pre>"
+                                await progress_message.edit_text(display_text, parse_mode='HTML')
+                                last_sent_text = full_progress_text
+                                last_update_time = current_time
+                            except Exception as e:
+                                if 'Message is not modified' not in str(e):
+                                    logger.warning(f"Gagal mengedit pesan progres: {e}")
+            
+            # Kirim pembaruan terakhir setelah loop selesai untuk memastikan 100%
+            if full_progress_text and full_progress_text != last_sent_text:
+                 display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{full_progress_text}</pre>"
+                 await progress_message.edit_text(display_text, parse_mode='HTML')
+
     except requests.HTTPError as e:
         error_body = e.response.text
         logger.error(f"Error HTTP saat memanggil mirror API '{worker_name}': {e} - {error_body}")
