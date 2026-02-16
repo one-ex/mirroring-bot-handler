@@ -308,7 +308,7 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_TYPE, worker_name: str, file_url: str, creds: Credentials | None):
-    """Memanggil API Hugging Face dan stream hasilnya."""
+    """Memanggil API Hugging Face, mendapatkan URL progres, lalu stream hasilnya."""
     chat_id = update.effective_chat.id
     
     worker_conf = WORKER_CONFIG[worker_name]
@@ -322,7 +322,6 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
     headers = {
         "X-API-Key": api_key
     }
-    # Hanya tambahkan token Google Auth jika diperlukan (untuk gdrive)
     if creds and creds.token:
         headers["Authorization"] = f"Bearer {creds.token}"
 
@@ -330,21 +329,41 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
         "url": file_url
     }
     
-    progress_message = await context.bot.send_message(chat_id, f"⏳ Memulai proses mirror ke '{worker_name}'...")
+    progress_message = await context.bot.send_message(chat_id, f"⏳ Menghubungi worker '{worker_name}'...")
 
     try:
-        with requests.post(f"{api_url}/mirror", json=params, headers=headers, stream=True) as r:
+        # Langkah 1: Panggil /mirror untuk memulai dan mendapatkan URL progres
+        with requests.post(f"{api_url}/mirror", json=params, headers=headers) as r:
             r.raise_for_status()
+            initial_response = r.json()
+            
+            if not initial_response.get('success') or 'progress_url' not in initial_response:
+                error_msg = initial_response.get('error', 'Respons tidak valid dari worker.')
+                await progress_message.edit_text(f"❌ Gagal memulai mirror di '{worker_name}': {error_msg}")
+                return
+
+            progress_url = initial_response['progress_url']
+
+        # Langkah 2: Panggil URL progres untuk mendapatkan stream pembaruan
+        await progress_message.edit_text(f"✅ Berhasil terhubung. Memulai stream progres dari '{worker_name}'...")
+        
+        # Worker GDrive dan lainnya menggunakan POST untuk progress
+        with requests.post(f"{api_url}{progress_url}", headers=headers, stream=True, json=params) as r_progress:
+            r_progress.raise_for_status()
             
             last_message_content = ""
-            for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
-                if chunk:
-                    # Coba untuk mengupdate pesan yang ada jika kontennya sama
-                    # Ini untuk menghindari rate limit Telegram
-                    if chunk != last_message_content:
-                        await progress_message.edit_text(f"<b>Worker: {worker_name}</b>\n<pre>{chunk}</pre>", parse_mode='HTML')
+            for chunk in r_progress.iter_content(chunk_size=None, decode_unicode=True):
+                if chunk and chunk != last_message_content:
+                    try:
+                        # Gabungkan header dan konten progres dalam satu pesan
+                        display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{chunk}</pre>"
+                        await progress_message.edit_text(display_text, parse_mode='HTML')
                         last_message_content = chunk
-                        await asyncio.sleep(1.5) # Beri jeda agar tidak terlalu cepat
+                        await asyncio.sleep(1.5) # Jeda untuk menghindari rate limit
+                    except Exception as e:
+                        # Bisa jadi error karena pesan tidak berubah, abaikan saja
+                        if 'Message is not modified' not in str(e):
+                            logger.warning(f"Gagal mengedit pesan progres: {e}")
     
     except requests.HTTPError as e:
         error_body = e.response.text
