@@ -176,56 +176,83 @@ async def poll_for_token(context: ContextTypes.DEFAULT_TYPE):
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk perintah /start."""
+    available_workers = ", ".join(f"`{w}`" for w in WORKER_CONFIG.keys())
     await update.message.reply_text(
         "Selamat datang di Mirror Bot!\n\n"
-        "Kirim perintah `/mirror <URL_FILE>` untuk memulai proses mirroring ke Google Drive Anda.\n\n"
-        "Jika Anda belum login, bot akan memandu Anda melalui proses otentikasi."
+        "Gunakan format perintah:\n"
+        "`/mirror <tujuan> <url>`\n\n"
+        "Contoh:\n"
+        "`/mirror gdrive https://example.com/file.zip`\n\n"
+        f"Tujuan yang tersedia: {available_workers}\n\n"
+        "Untuk tujuan `gdrive`, bot akan memandu Anda melalui proses otentikasi jika diperlukan.",
+        parse_mode='Markdown'
     )
 
 async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk perintah /mirror."""
     user_id = update.effective_user.id
     
-    # 1. Cek apakah user sudah memberikan URL
-    if not context.args:
-        await update.message.reply_text("Gunakan format: `/mirror <URL_FILE>`")
+    # 1. Cek format perintah
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "Format salah. Gunakan: `/mirror <tujuan> <url>`\n"
+            "Contoh: `/mirror gdrive https://example.com/file.zip`"
+        )
         return
     
-    file_url = context.args[0]
+    worker_name = context.args[0].lower()
+    file_url = context.args[1]
 
-    # 2. Cek apakah user sudah terotentikasi
-    creds = get_credentials(user_id)
-    if not creds:
-        await update.message.reply_text("Anda belum terotentikasi. Memulai proses otentikasi...")
-        await start_auth_flow(update, context)
-        # Simpan URL untuk nanti setelah auth berhasil
-        context.user_data['pending_mirror_url'] = file_url
+    # 2. Cek apakah worker valid
+    if worker_name not in WORKER_CONFIG:
+        await update.message.reply_text(
+            f"Tujuan '{worker_name}' tidak ditemukan. "
+            f"Pilihan yang tersedia: {', '.join(WORKER_CONFIG.keys())}"
+        )
         return
 
-    # 3. Jika sudah terotentikasi, mulai proses mirroring
-    await start_mirroring_process(update, context, file_url, creds)
+    # 3. Khusus untuk 'gdrive', cek otentikasi Google
+    creds = None
+    if worker_name == 'gdrive':
+        creds = get_credentials(user_id)
+        if not creds:
+            await update.message.reply_text("Anda perlu otentikasi Google untuk menggunakan tujuan 'gdrive'. Memulai proses...")
+            await start_auth_flow(update, context)
+            # Simpan detail permintaan untuk nanti setelah auth berhasil
+            context.user_data['pending_mirror'] = {'worker': worker_name, 'url': file_url}
+            return
+
+    # 4. Jika valid dan (jika perlu) terotentikasi, mulai proses mirroring
+    await start_mirroring_process(update, context, worker_name, file_url, creds)
 
 
-async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_TYPE, file_url: str, creds: Credentials):
+async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_TYPE, worker_name: str, file_url: str, creds: Credentials | None):
     """Memanggil API Hugging Face dan stream hasilnya."""
     chat_id = update.effective_chat.id
     
-    if not HF_MIRROR_API_URL or not HF_MIRROR_API_KEY:
-        await context.bot.send_message(chat_id, "Konfigurasi sisi server tidak lengkap. Hubungi admin.")
+    worker_conf = WORKER_CONFIG[worker_name]
+    api_url = worker_conf.get('url')
+    api_key = worker_conf.get('api_key')
+
+    if not api_url or not api_key:
+        await context.bot.send_message(chat_id, f"Konfigurasi untuk worker '{worker_name}' tidak lengkap. Hubungi admin.")
         return
 
     headers = {
-        "Authorization": f"Bearer {creds.token}",
-        "X-API-Key": HF_MIRROR_API_KEY
+        "X-API-Key": api_key
     }
+    # Hanya tambahkan token Google Auth jika diperlukan (untuk gdrive)
+    if creds and creds.token:
+        headers["Authorization"] = f"Bearer {creds.token}"
+
     params = {
         "url": file_url
     }
     
-    progress_message = await context.bot.send_message(chat_id, "⏳ Memulai proses mirror...")
+    progress_message = await context.bot.send_message(chat_id, f"⏳ Memulai proses mirror ke '{worker_name}'...")
 
     try:
-        with requests.get(f"{HF_MIRROR_API_URL}/mirror", params=params, headers=headers, stream=True) as r:
+        with requests.get(f"{api_url}/mirror", params=params, headers=headers, stream=True) as r:
             r.raise_for_status()
             
             last_message_content = ""
@@ -234,23 +261,31 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
                     # Coba untuk mengupdate pesan yang ada jika kontennya sama
                     # Ini untuk menghindari rate limit Telegram
                     if chunk != last_message_content:
-                        await progress_message.edit_text(f"<pre>{chunk}</pre>", parse_mode='HTML')
+                        await progress_message.edit_text(f"<b>Worker: {worker_name}</b>\n<pre>{chunk}</pre>", parse_mode='HTML')
                         last_message_content = chunk
                         await asyncio.sleep(1.5) # Beri jeda agar tidak terlalu cepat
-
+    
+    except requests.HTTPError as e:
+        error_body = e.response.text
+        logger.error(f"Error HTTP saat memanggil mirror API '{worker_name}': {e} - {error_body}")
+        await progress_message.edit_text(f"❌ Gagal menghubungi server mirror '{worker_name}':\n<pre>{error_body}</pre>", parse_mode='HTML')
     except requests.RequestException as e:
-        logger.error(f"Error saat memanggil mirror API: {e}")
-        await progress_message.edit_text(f"❌ Gagal menghubungi server mirror: {e}")
+        logger.error(f"Error saat memanggil mirror API '{worker_name}': {e}")
+        await progress_message.edit_text(f"❌ Gagal menghubungi server mirror '{worker_name}': {e}")
     except Exception as e:
-        logger.error(f"Error tidak terduga saat mirroring: {e}")
+        logger.error(f"Error tidak terduga saat mirroring ke '{worker_name}': {e}")
         await progress_message.edit_text(f"❌ Terjadi error tidak terduga: {e}")
 
 
 def main():
     """Jalankan bot."""
-    if not all([TELEGRAM_BOT_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, HF_MIRROR_API_URL, HF_MIRROR_API_KEY]):
-        logger.critical("Variabel environment tidak lengkap! Bot tidak bisa dijalankan.")
+    if not TELEGRAM_BOT_TOKEN or not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        logger.critical("Variabel environment dasar (BOT_TOKEN, GOOGLE_CLIENT_ID/SECRET) tidak lengkap! Bot tidak bisa dijalankan.")
         return
+    
+    # Verifikasi bahwa setidaknya satu worker dikonfigurasi
+    if not any(conf['url'] and conf['api_key'] for conf in WORKER_CONFIG.values()):
+        logger.warning("Tidak ada worker yang dikonfigurasi dengan lengkap (URL dan API_KEY). Bot akan berjalan, tapi mungkin tidak berfungsi.")
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
