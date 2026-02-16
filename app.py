@@ -340,6 +340,8 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             last_update_time = 0
             raw_buffer = ""
             last_sent_text = ""
+            header_text = ""
+            header_found = False
             
             ansi_escape_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             progress_marker = "📦"
@@ -356,16 +358,17 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
                 if (current_time - last_update_time) > 1.0:
                     cleaned_buffer = ansi_escape_regex.sub('', raw_buffer)
                     
-                    parts = cleaned_buffer.split(progress_marker)
+                    if not header_found:
+                        marker_pos = cleaned_buffer.find(progress_marker)
+                        if marker_pos != -1:
+                            header_text = cleaned_buffer[:marker_pos]
+                            header_found = True
                     
-                    if len(parts) > 1:
-                        # Ada marker, gabungkan header dengan blok progres terakhir
-                        header = parts[0]
-                        latest_progress = parts[-1]
-                        # Tambahkan kembali marker yang hilang saat split
-                        display_content = (header + progress_marker + latest_progress).strip()
+                    last_marker_pos = cleaned_buffer.rfind(progress_marker)
+                    if last_marker_pos != -1:
+                        latest_progress_block = cleaned_buffer[last_marker_pos:]
+                        display_content = (header_text + latest_progress_block).strip()
                     else:
-                        # Belum ada marker, tampilkan saja apa adanya
                         display_content = cleaned_buffer.strip()
 
                     if display_content and display_content != last_sent_text:
@@ -381,11 +384,15 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             # Kirim pembaruan terakhir setelah loop selesai
             final_cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
             if final_cleaned_text and final_cleaned_text != last_sent_text:
-                 parts = final_cleaned_text.split(progress_marker)
-                 if len(parts) > 1:
-                     header = parts[0]
-                     latest_progress = parts[-1]
-                     final_display_content = (header + progress_marker + latest_progress).strip()
+                 last_marker_pos = final_cleaned_text.rfind(progress_marker)
+                 if last_marker_pos != -1:
+                     if not header_found:
+                         first_marker_pos = final_cleaned_text.find(progress_marker)
+                         if first_marker_pos != -1:
+                             header_text = final_cleaned_text[:first_marker_pos]
+                     
+                     final_progress_block = final_cleaned_text[last_marker_pos:]
+                     final_display_content = (header_text + final_progress_block).strip()
                  else:
                      final_display_content = final_cleaned_text
                  
