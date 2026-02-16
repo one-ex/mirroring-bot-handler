@@ -357,7 +357,7 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
                     
                     current_time = asyncio.get_event_loop().time()
                     # Terapkan throttling: update setiap 1.5 detik
-                    if (current_time - last_update_time) >0.1:
+                    if (current_time - last_update_time) >1:
                         # Hanya kirim jika ada perubahan
                         if full_progress_text != last_sent_text:
                             try:
