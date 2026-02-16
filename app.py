@@ -333,7 +333,7 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
     progress_message = await context.bot.send_message(chat_id, f"⏳ Memulai proses mirror ke '{worker_name}'...")
 
     try:
-        with requests.get(f"{api_url}/mirror", params=params, headers=headers, stream=True) as r:
+        with requests.post(f"{api_url}/mirror", json=params, headers=headers, stream=True) as r:
             r.raise_for_status()
             
             last_message_content = ""
