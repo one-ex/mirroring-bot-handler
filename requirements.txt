@@ -1,6 +1,7 @@
-# Daftar library Python yang dibutuhkan oleh bot
-
-python-telegram-bot==20.3
-requests
-google-api-python-client
+telegram
+python-telegram-bot
 google-auth-oauthlib
+google-api-python-client
+google-auth-httplib2
+requests
+psycopg2-binary

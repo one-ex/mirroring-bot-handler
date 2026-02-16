@@ -5,6 +5,8 @@ import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from google_auth_oauthlib.flow import InstalledAppFlow
+import psycopg2
+from urllib.parse import urlparse
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
@@ -19,6 +21,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # URL dan Kunci API untuk setiap worker di Hugging Face
 WORKER_CONFIG = {
@@ -41,31 +44,95 @@ SCOPES = ['https://www.googleapis.com/auth/drive.file']
 DEVICE_AUTH_URL = "https://oauth2.googleapis.com/device/code"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-# --- Placeholder untuk Database Token ---
-# Di aplikasi production, ganti ini dengan database (e.g., Render PostgreSQL)
-# Format: { "user_id": {"refresh_token": "...", "access_token": "...", "expires_at": ...} }
-user_tokens = {}
+# --- Fungsi Database ---
+
+def get_db_connection():
+    """Membuat dan mengembalikan koneksi ke database."""
+    result = urlparse(DATABASE_URL)
+    username = result.username
+    password = result.password
+    database = result.path[1:]
+    hostname = result.hostname
+    port = result.port
+    conn = psycopg2.connect(
+        dbname=database,
+        user=username,
+        password=password,
+        host=hostname,
+        port=port
+    )
+    return conn
+
+def init_db():
+    """Inisialisasi tabel database jika belum ada."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_credentials (
+            user_id BIGINT PRIMARY KEY,
+            refresh_token TEXT NOT NULL,
+            access_token TEXT,
+            expires_at TIMESTAMP
+        );
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+    logger.info("Database berhasil diinisialisasi.")
+
+def save_credentials(user_id: int, creds: Credentials):
+    """Menyimpan atau memperbarui kredensial user di database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO user_credentials (user_id, refresh_token, access_token, expires_at)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (user_id) DO UPDATE SET
+            refresh_token = EXCLUDED.refresh_token,
+            access_token = EXCLUDED.access_token,
+            expires_at = EXCLUDED.expires_at;
+        """,
+        (user_id, creds.refresh_token, creds.token, creds.expiry)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    logger.info(f"Kredensial untuk user {user_id} berhasil disimpan.")
 
 # --- Fungsi Bantuan Otentikasi ---
 
 def get_credentials(user_id: int) -> Credentials | None:
-    """Mengambil atau merefresh kredensial user dari 'database'."""
-    if user_id not in user_tokens or 'refresh_token' not in user_tokens[user_id]:
+    """Mengambil atau merefresh kredensial user dari database."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT refresh_token, access_token, expires_at FROM user_credentials WHERE user_id = %s", (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
         return None
 
-    creds = Credentials.from_authorized_user_info(user_tokens[user_id], SCOPES)
+    refresh_token, access_token, expires_at = row
+    
+    # Buat objek Credentials dari data database
+    creds_info = {
+        'refresh_token': refresh_token,
+        'access_token': access_token,
+        'expiry': expires_at,
+        'token_uri': TOKEN_URL,
+        'client_id': GOOGLE_CLIENT_ID,
+        'client_secret': GOOGLE_CLIENT_SECRET,
+        'scopes': SCOPES
+    }
+    creds = Credentials.from_authorized_user_info(creds_info)
 
     if creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            # Simpan token yang sudah di-refresh
-            user_tokens[user_id] = {
-                'refresh_token': creds.refresh_token,
-                'access_token': creds.token,
-                'expires_at': creds.expiry.timestamp(),
-                'client_id': GOOGLE_CLIENT_ID,
-                'client_secret': GOOGLE_CLIENT_SECRET,
-            }
+            # Simpan token yang sudah di-refresh ke database
+            save_credentials(user_id, creds)
             logger.info(f"Token untuk user {user_id} berhasil di-refresh.")
         except Exception as e:
             logger.error(f"Gagal merefresh token untuk user {user_id}: {e}")
@@ -143,15 +210,29 @@ async def poll_for_token(context: ContextTypes.DEFAULT_TYPE):
 
         if 'access_token' in token_data:
             # Sukses! User telah memberikan izin.
-            user_tokens[user_id] = {
-                'refresh_token': token_data['refresh_token'],
-                'access_token': token_data['access_token'],
-                'expires_at': asyncio.get_event_loop().time() + token_data['expires_in'],
-                'client_id': GOOGLE_CLIENT_ID,
-                'client_secret': GOOGLE_CLIENT_SECRET,
-            }
-            logger.info(f"Token berhasil didapatkan untuk user {user_id}.")
-            await context.bot.send_message(chat_id, "✅ Otentikasi berhasil! Anda sekarang bisa menggunakan perintah /mirror.")
+            # Buat objek Credentials untuk disimpan
+            creds = Credentials(
+                token=token_data['access_token'],
+                refresh_token=token_data.get('refresh_token'),
+                token_uri=TOKEN_URL,
+                client_id=GOOGLE_CLIENT_ID,
+                client_secret=GOOGLE_CLIENT_SECRET,
+                scopes=SCOPES
+            )
+            # Simpan ke database
+            save_credentials(user_id, creds)
+            
+            logger.info(f"Token berhasil didapatkan dan disimpan untuk user {user_id}.")
+            await context.bot.send_message(chat_id, "✅ Otentikasi berhasil! Anda sekarang bisa menggunakan perintah /mirror untuk 'gdrive'.")
+
+            # Cek apakah ada permintaan mirror yang tertunda
+            if 'pending_mirror' in context.user_data:
+                pending = context.user_data.pop('pending_mirror')
+                worker_name = pending['worker']
+                file_url = pending['url']
+                logger.info(f"Melanjutkan permintaan mirror yang tertunda untuk user {user_id} ke '{worker_name}'.")
+                # Panggil kembali start_mirroring_process dengan kredensial yang baru didapat
+                await start_mirroring_process(update, context, worker_name, file_url, creds)
             return
 
         elif token_data.get('error') == 'authorization_pending':
@@ -279,13 +360,23 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
 
 def main():
     """Jalankan bot."""
-    if not TELEGRAM_BOT_TOKEN or not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        logger.critical("Variabel environment dasar (BOT_TOKEN, GOOGLE_CLIENT_ID/SECRET) tidak lengkap! Bot tidak bisa dijalankan.")
+    # Pengecekan environment variable kritis
+    required_vars = ['TELEGRAM_BOT_TOKEN', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DATABASE_URL']
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+    if missing_vars:
+        logger.critical(f"Variabel environment berikut tidak ditemukan: {', '.join(missing_vars)}. Bot tidak bisa dijalankan.")
         return
-    
+
+    # Inisialisasi database
+    try:
+        init_db()
+    except Exception as e:
+        logger.critical(f"Gagal menginisialisasi database: {e}. Bot tidak bisa dijalankan.")
+        return
+
     # Verifikasi bahwa setidaknya satu worker dikonfigurasi
     if not any(conf['url'] and conf['api_key'] for conf in WORKER_CONFIG.values()):
-        logger.warning("Tidak ada worker yang dikonfigurasi dengan lengkap (URL dan API_KEY). Bot akan berjalan, tapi mungkin tidak berfungsi.")
+        logger.warning("Tidak ada worker yang dikonfigurasi dengan lengkap (URL dan API_KEY). Bot akan berjalan, tapi perintah /mirror tidak akan berfungsi.")
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
