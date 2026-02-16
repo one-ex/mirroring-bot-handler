@@ -341,9 +341,7 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             raw_buffer = ""
             last_sent_text = ""
             
-            # Regex untuk memisahkan "frame" berdasarkan ANSI codes untuk clear/reset screen
-            clear_screen_regex = re.compile(r'\x1B\[[0-9;]*[J|H]')
-            # Regex untuk membersihkan sisa ANSI codes dari frame final
+            # Regex untuk membersihkan SEMUA jenis ANSI escape code
             ansi_escape_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
             await progress_message.edit_text(f"✅ Berhasil terhubung. Memulai stream progres dari '{worker_name}'...")
@@ -355,27 +353,25 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
                 raw_buffer += chunk
                 current_time = asyncio.get_event_loop().time()
 
-                # Terapkan throttling: update setiap 1 detik
                 if (current_time - last_update_time) > 1.0:
-                    # Pisahkan buffer menjadi frame berdasarkan clear-screen codes
-                    frames = clear_screen_regex.split(raw_buffer)
-                    
-                    # Frame terbaru adalah yang terakhir. Mungkin tidak lengkap, tapi itu tidak masalah
-                    # karena akan dilengkapi di iterasi berikutnya.
-                    latest_frame = frames[-1] if frames else ""
-                    
-                    # Bersihkan sisa-sisa ANSI codes dari frame ini
-                    cleaned_frame = ansi_escape_regex.sub('', latest_frame).strip()
+                    # Cukup bersihkan seluruh buffer dari kode ANSI.
+                    # Ini secara efektif akan "meratakan" output terminal,
+                    # menghilangkan efek "overwrite" dan hanya menyisakan teks.
+                    # Karena teks progres yang baru selalu muncul di akhir stream,
+                    # pesan akan terlihat terakumulasi, tetapi setidaknya akan update.
+                    cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
 
-                    # Atur ulang buffer ke frame terakhir untuk iterasi berikutnya,
-                    # ini mencegah buffer tumbuh tanpa batas.
-                    raw_buffer = latest_frame
-
-                    if cleaned_frame and cleaned_frame != last_sent_text:
+                    if cleaned_text and cleaned_text != last_sent_text:
                         try:
-                            display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{cleaned_frame}</pre>"
+                            # Batasi panjang teks untuk mencegah error dari Telegram
+                            max_len = 4000
+                            if len(cleaned_text) > max_len:
+                                # Ambil 4000 karakter terakhir untuk menampilkan progres terbaru
+                                cleaned_text = "...\n" + cleaned_text[-max_len:]
+
+                            display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{cleaned_text}</pre>"
                             await progress_message.edit_text(display_text, parse_mode='HTML')
-                            last_sent_text = cleaned_frame
+                            last_sent_text = cleaned_text
                             last_update_time = current_time
                         except Exception as e:
                             if 'Message is not modified' not in str(e):
@@ -384,6 +380,9 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             # Kirim pembaruan terakhir setelah loop selesai
             final_cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
             if final_cleaned_text and final_cleaned_text != last_sent_text:
+                 max_len = 4000
+                 if len(final_cleaned_text) > max_len:
+                     final_cleaned_text = "...\n" + final_cleaned_text[-max_len:]
                  display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{final_cleaned_text}</pre>"
                  await progress_message.edit_text(display_text, parse_mode='HTML')
 
