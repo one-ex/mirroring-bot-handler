@@ -341,8 +341,8 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             raw_buffer = ""
             last_sent_text = ""
             
-            # Regex untuk membersihkan SEMUA jenis ANSI escape code
             ansi_escape_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            progress_marker = "📦"
 
             await progress_message.edit_text(f"✅ Berhasil terhubung. Memulai stream progres dari '{worker_name}'...")
 
@@ -354,24 +354,25 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
                 current_time = asyncio.get_event_loop().time()
 
                 if (current_time - last_update_time) > 1.0:
-                    # Cukup bersihkan seluruh buffer dari kode ANSI.
-                    # Ini secara efektif akan "meratakan" output terminal,
-                    # menghilangkan efek "overwrite" dan hanya menyisakan teks.
-                    # Karena teks progres yang baru selalu muncul di akhir stream,
-                    # pesan akan terlihat terakumulasi, tetapi setidaknya akan update.
-                    cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
+                    cleaned_buffer = ansi_escape_regex.sub('', raw_buffer)
+                    
+                    parts = cleaned_buffer.split(progress_marker)
+                    
+                    if len(parts) > 1:
+                        # Ada marker, gabungkan header dengan blok progres terakhir
+                        header = parts[0]
+                        latest_progress = parts[-1]
+                        # Tambahkan kembali marker yang hilang saat split
+                        display_content = (header + progress_marker + latest_progress).strip()
+                    else:
+                        # Belum ada marker, tampilkan saja apa adanya
+                        display_content = cleaned_buffer.strip()
 
-                    if cleaned_text and cleaned_text != last_sent_text:
+                    if display_content and display_content != last_sent_text:
                         try:
-                            # Batasi panjang teks untuk mencegah error dari Telegram
-                            max_len = 4000
-                            if len(cleaned_text) > max_len:
-                                # Ambil 4000 karakter terakhir untuk menampilkan progres terbaru
-                                cleaned_text = "...\n" + cleaned_text[-max_len:]
-
-                            display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{cleaned_text}</pre>"
+                            display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{display_content}</pre>"
                             await progress_message.edit_text(display_text, parse_mode='HTML')
-                            last_sent_text = cleaned_text
+                            last_sent_text = display_content
                             last_update_time = current_time
                         except Exception as e:
                             if 'Message is not modified' not in str(e):
@@ -380,10 +381,15 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
             # Kirim pembaruan terakhir setelah loop selesai
             final_cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
             if final_cleaned_text and final_cleaned_text != last_sent_text:
-                 max_len = 4000
-                 if len(final_cleaned_text) > max_len:
-                     final_cleaned_text = "...\n" + final_cleaned_text[-max_len:]
-                 display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{final_cleaned_text}</pre>"
+                 parts = final_cleaned_text.split(progress_marker)
+                 if len(parts) > 1:
+                     header = parts[0]
+                     latest_progress = parts[-1]
+                     final_display_content = (header + progress_marker + latest_progress).strip()
+                 else:
+                     final_display_content = final_cleaned_text
+                 
+                 display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{final_display_content}</pre>"
                  await progress_message.edit_text(display_text, parse_mode='HTML')
 
     except requests.HTTPError as e:
