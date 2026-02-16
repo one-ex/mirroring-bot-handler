@@ -384,7 +384,7 @@ def main():
     application.add_handler(CommandHandler("mirror", mirror_command))
 
     logger.info("Bot berhasil dijalankan!")
-    application.run_polling()
+    application.run_polling(drop_pending_updates=True)
 
 
 if __name__ == '__main__':
