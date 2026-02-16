@@ -358,6 +358,21 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
         await progress_message.edit_text(f"❌ Terjadi error tidak terduga: {e}")
 
 
+from flask import Flask
+from threading import Thread
+
+def run_web_server():
+    """Menjalankan web server Flask sederhana untuk memenuhi persyaratan Render."""
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def index():
+        return "Bot is running!", 200
+        
+    # Render menyediakan port melalui env var PORT
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
 def main():
     """Jalankan bot."""
     # Pengecekan environment variable kritis
@@ -373,6 +388,12 @@ def main():
     except Exception as e:
         logger.critical(f"Gagal menginisialisasi database: {e}. Bot tidak bisa dijalankan.")
         return
+
+    # Jalankan web server di thread terpisah
+    web_thread = Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
+    logger.info("Fake web server untuk Render Health Check telah dijalankan.")
 
     # Verifikasi bahwa setidaknya satu worker dikonfigurasi
     if not any(conf['url'] and conf['api_key'] for conf in WORKER_CONFIG.values()):
