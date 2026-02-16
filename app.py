@@ -308,13 +308,8 @@ async def mirror_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start_mirroring_process(update, context, worker_name, file_url, creds)
 
 
-def strip_ansi_codes(text: str) -> str:
-    """Menghapus ANSI escape codes dari teks."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
-
 async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_TYPE, worker_name: str, file_url: str, creds: Credentials | None):
-    """Memanggil endpoint /mirror-progress secara langsung untuk memulai dan stream progres."""
+    """Memanggil endpoint /mirror-progress, mem-parse output terminal, dan stream progres."""
     chat_id = update.effective_chat.id
     
     worker_conf = WORKER_CONFIG[worker_name]
@@ -339,39 +334,57 @@ async def start_mirroring_process(update: Update, context: ContextTypes.DEFAULT_
     progress_message = await context.bot.send_message(chat_id, f"⏳ Menghubungi worker '{worker_name}' dan memulai proses mirroring...")
 
     try:
-        # Langsung panggil /mirror-progress untuk memulai dan stream
         with requests.post(f"{api_url}/mirror-progress", headers=headers, json=params, stream=True) as r:
             r.raise_for_status()
             
             last_update_time = 0
-            full_progress_text = ""
+            raw_buffer = ""
             last_sent_text = ""
+            
+            # Regex untuk memisahkan "frame" berdasarkan ANSI codes untuk clear/reset screen
+            clear_screen_regex = re.compile(r'\x1B\[[0-9;]*[J|H]')
+            # Regex untuk membersihkan sisa ANSI codes dari frame final
+            ansi_escape_regex = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
             await progress_message.edit_text(f"✅ Berhasil terhubung. Memulai stream progres dari '{worker_name}'...")
 
-            for chunk in r.iter_content(chunk_size=None, decode_unicode=True):
-                if chunk:
-                    # Bersihkan dan gabungkan chunk
-                    cleaned_chunk = strip_ansi_codes(chunk)
-                    full_progress_text += cleaned_chunk
+            for chunk in r.iter_content(chunk_size=1024, decode_unicode=True):
+                if not chunk:
+                    continue
+
+                raw_buffer += chunk
+                current_time = asyncio.get_event_loop().time()
+
+                # Terapkan throttling: update setiap 1 detik
+                if (current_time - last_update_time) > 1.0:
+                    # Pisahkan buffer menjadi frame berdasarkan clear-screen codes
+                    frames = clear_screen_regex.split(raw_buffer)
                     
-                    current_time = asyncio.get_event_loop().time()
-                    # Terapkan throttling: update setiap 1.5 detik
-                    if (current_time - last_update_time) >1:
-                        # Hanya kirim jika ada perubahan
-                        if full_progress_text != last_sent_text:
-                            try:
-                                display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{full_progress_text}</pre>"
-                                await progress_message.edit_text(display_text, parse_mode='HTML')
-                                last_sent_text = full_progress_text
-                                last_update_time = current_time
-                            except Exception as e:
-                                if 'Message is not modified' not in str(e):
-                                    logger.warning(f"Gagal mengedit pesan progres: {e}")
-            
-            # Kirim pembaruan terakhir setelah loop selesai untuk memastikan 100%
-            if full_progress_text and full_progress_text != last_sent_text:
-                 display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{full_progress_text}</pre>"
+                    # Frame terbaru adalah yang terakhir. Mungkin tidak lengkap, tapi itu tidak masalah
+                    # karena akan dilengkapi di iterasi berikutnya.
+                    latest_frame = frames[-1] if frames else ""
+                    
+                    # Bersihkan sisa-sisa ANSI codes dari frame ini
+                    cleaned_frame = ansi_escape_regex.sub('', latest_frame).strip()
+
+                    # Atur ulang buffer ke frame terakhir untuk iterasi berikutnya,
+                    # ini mencegah buffer tumbuh tanpa batas.
+                    raw_buffer = latest_frame
+
+                    if cleaned_frame and cleaned_frame != last_sent_text:
+                        try:
+                            display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{cleaned_frame}</pre>"
+                            await progress_message.edit_text(display_text, parse_mode='HTML')
+                            last_sent_text = cleaned_frame
+                            last_update_time = current_time
+                        except Exception as e:
+                            if 'Message is not modified' not in str(e):
+                                logger.warning(f"Gagal mengedit pesan progres: {e}")
+
+            # Kirim pembaruan terakhir setelah loop selesai
+            final_cleaned_text = ansi_escape_regex.sub('', raw_buffer).strip()
+            if final_cleaned_text and final_cleaned_text != last_sent_text:
+                 display_text = f"<b>Worker: {worker_name}</b>\n\n<pre>{final_cleaned_text}</pre>"
                  await progress_message.edit_text(display_text, parse_mode='HTML')
 
     except requests.HTTPError as e:
