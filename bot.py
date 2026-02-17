@@ -51,7 +51,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> str:
     eta = status_info.get('estimasi', 0)
 
     # Progress Bar
-    bar_length = 20
+    bar_length = 25
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
