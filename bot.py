@@ -4,6 +4,8 @@ import re
 import requests
 import asyncio
 from urllib.parse import urlparse
+from threading import Thread
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
@@ -17,12 +19,24 @@ GOFILE_API_URL = os.getenv('GOFILE_API_URL')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 3  # Detik
+PORT = int(os.environ.get('PORT', 10000))
 
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
 
 # Pola URL
 URL_PATTERN = re.compile(r'https?://\S+')
+
+# --- Fungsi Web Server ---
+def run_web_server():
+    """Menjalankan web server Flask sederhana untuk memenuhi persyaratan Render."""
+    app = Flask(__name__)
+    @app.route('/')
+    def index():
+        return "Bot is running!", 200
+    
+    logger.info(f"Starting Flask server on port {PORT}")
+    app.run(host='0.0.0.0', port=PORT)
 
 # --- Fungsi Pembantu ---
 
