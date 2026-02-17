@@ -19,24 +19,12 @@ GOFILE_API_URL = os.getenv('GOFILE_API_URL')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 3  # Detik
-PORT = int(os.environ.get('PORT', 10000))
 
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
 
 # Pola URL
 URL_PATTERN = re.compile(r'https?://\S+')
-
-# --- Fungsi Web Server ---
-def run_web_server():
-    """Menjalankan web server Flask sederhana untuk memenuhi persyaratan Render."""
-    app = Flask(__name__)
-    @app.route('/')
-    def index():
-        return "Bot is running!", 200
-    
-    logger.info(f"Starting Flask server on port {PORT}")
-    app.run(host='0.0.0.0', port=PORT)
 
 # --- Fungsi Pembantu ---
 
@@ -313,8 +301,26 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
+def run_web_server():
+    """Menjalankan web server Flask sederhana untuk memenuhi persyaratan Render."""
+    app = Flask(__name__)
+    
+    @app.route('/')
+    def index():
+        return "Bot is running!", 200
+        
+    # Render menyediakan port melalui env var PORT
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
 def main() -> None:
     """Jalankan bot."""
+    # Jalankan web server di thread terpisah
+    web_thread = Thread(target=run_web_server)
+    web_thread.daemon = True
+    web_thread.start()
+    logger.info("Web server untuk Render Health Check telah dijalankan.")
+
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Initialize bot_data
