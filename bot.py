@@ -159,9 +159,9 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler untuk perintah /start"""
     user = update.effective_user
-    if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-        await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-        return
+    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+    #     return
     await update.message.reply_html(
         rf"👋 Halo {user.mention_html()}! Kirimkan saya sebuah URL untuk memulai.",
         reply_markup=None,
@@ -170,9 +170,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai alur mirror saat mendeteksi URL."""
     user = update.effective_user
-    if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-        await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-        return ConversationHandler.END
+    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+    #     return ConversationHandler.END
 
     message_text = update.message.text
     match = URL_PATTERN.search(message_text)
