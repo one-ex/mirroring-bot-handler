@@ -23,9 +23,6 @@ POLLING_INTERVAL = 3  # Detik
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
 
-# Pola URL
-URL_PATTERN = re.compile(r'https?://\S+')
-
 # --- Fungsi Pembantu ---
 
 def format_bytes(size: int) -> str:
@@ -176,16 +173,24 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
     #     return ConversationHandler.END
 
-    message_text = update.message.text
-    match = URL_PATTERN.search(message_text)
-    if not match:
-        await update.message.reply_text("❌ URL tidak ditemukan dalam pesan.")
-        return ConversationHandler.END
-        
-    url = match.group(0)
+    message = update.message
+    # Cari entitas URL dalam pesan
+    url_entities = message.parse_entities(types=[MessageEntity.URL])
+    if not url_entities:
+        # Jika tidak ada entitas URL, coba cari tautan teks biasa
+        text_link_entities = message.parse_entities(types=[MessageEntity.TEXT_LINK])
+        if not text_link_entities:
+            await message.reply_text("❌ URL tidak ditemukan dalam pesan.")
+            return ConversationHandler.END
+        # Ambil URL dari entitas text_link pertama
+        url = list(text_link_entities.keys())[0].url
+    else:
+        # Ambil URL dari entitas URL pertama
+        url = list(url_entities.values())[0]
+
     context.user_data['url'] = url
     
-    processing_message = await update.message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
+    processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
     
     info = await get_file_info_from_url(url)
     
@@ -331,7 +336,7 @@ def main() -> None:
     job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=1)
 
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND & URL_PATTERN, url_handler)],
+        entry_points=[MessageHandler(filters.TEXT & (filters.Entity(MessageEntity.URL) | filters.Entity(MessageEntity.TEXT_LINK)), url_handler)],
         states={
             SELECTING_ACTION: [
                 CallbackQueryHandler(select_service, pattern='^continue$'),
