@@ -19,6 +19,10 @@ PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 1  # Detik
 
+# --- Inisialisasi Global ---
+app = Flask(__name__)
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
 
@@ -359,10 +363,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-def main() -> None:
-    """Jalankan bot dalam mode webhook."""
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+@app.route('/')
+def index():
+    return "Bot is running!", 200
 
+@app.route('/webhook', methods=['POST'])
+async def webhook():
+    try:
+        update_data = request.get_json()
+        update = Update.de_json(update_data, application.bot)
+        await application.process_update(update)
+        return "OK", 200
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return "Error", 500
+
+def setup_bot():
+    """Mengatur semua handler dan job queue untuk bot."""
     # Initialize bot_data dan JobQueue
     application.bot_data['active_mirrors'] = {}
     job_queue = application.job_queue
@@ -385,37 +402,39 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(stop_mirror_handler, pattern='^stop_'))
+    logger.info("Bot handlers and job queue have been set up.")
 
-    # Inisialisasi Flask App
-    app = Flask(__name__)
-
-    @app.route('/')
-    def index():
-        return "Bot is running!", 200
-
-    @app.route('/webhook', methods=['POST'])
-    async def webhook():
-        try:
-            update = Update.de_json(await request.get_json(), application.bot)
-            await application.process_update(update)
-            return "OK", 200
-        except Exception as e:
-            logger.error(f"Error processing webhook: {e}")
-            return "Error", 500
-
-    # Set webhook
-    # URL ini harus Anda dapatkan dari dasbor Render Anda
+async def setup_webhook():
+    """Mengatur webhook Telegram."""
     WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL')
     if WEBHOOK_URL:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(application.bot.set_webhook(f"{WEBHOOK_URL}/webhook"))
-        logger.info(f"Webhook telah diatur ke {WEBHOOK_URL}/webhook")
+        await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
+        logger.info(f"Webhook has been set to {WEBHOOK_URL}/webhook")
     else:
-        logger.warning("RENDER_EXTERNAL_URL tidak diatur. Webhook tidak dapat diatur secara otomatis.")
+        logger.warning("RENDER_EXTERNAL_URL is not set. Webhook cannot be set automatically.")
 
-    # Jalankan server Flask
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
-
+# --- Main Execution ---
 if __name__ == '__main__':
-    main()
+    # Atur bot
+    setup_bot()
+    
+    # Atur webhook dalam event loop
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(setup_webhook())
+    except Exception as e:
+        logger.error(f"Failed to set up webhook: {e}")
+
+    # Jalankan server Flask untuk pengembangan lokal
+    # Gunicorn akan menjalankan 'app' secara langsung di produksi
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+else:
+    # Atur bot saat Gunicorn mengimpor file ini
+    setup_bot()
+    # Atur webhook saat Gunicorn memulai
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        loop.create_task(setup_webhook())
+    else:
+        loop.run_until_complete(setup_webhook())
