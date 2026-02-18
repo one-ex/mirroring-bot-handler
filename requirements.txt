@@ -1,6 +1,5 @@
 python-telegram-bot[job-queue]
 requests
-Flask
 gunicorn
 uvicorn
 asgiref

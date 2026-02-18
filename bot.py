@@ -5,10 +5,10 @@ import httpx
 import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from flask import Flask, request
 from starlette.applications import Starlette
-from starlette.routing import Mount
-from starlette.middleware.wsgi import WSGIMiddleware
+from starlette.routing import Route
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, JSONResponse
 from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
@@ -32,8 +32,23 @@ POLLING_INTERVAL = 1  # Detik
 
 # --- Inisialisasi Global ---
 application = Application.builder().token(TELEGRAM_TOKEN).build()
-flask_app = Flask(__name__)
 async_client = httpx.AsyncClient(timeout=30)
+
+async def webhook(request: Request):
+    """Endpoint webhook untuk menerima pembaruan dari Telegram."""
+    try:
+        update_data = await request.json()
+        logger.info(f"Webhook received data: {update_data}")
+        update = Update.de_json(update_data, application.bot)
+        await application.process_update(update)
+        return PlainTextResponse("OK", 200)
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return PlainTextResponse("Error", 500)
+
+async def health_check(request: Request):
+    """Endpoint untuk memeriksa status bot."""
+    return PlainTextResponse("Bot is running!", 200)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -51,9 +66,10 @@ async def lifespan(app):
     await async_client.aclose()
     logger.info("Application has stopped.")
 
-# Buat aplikasi Starlette dengan lifespan manager dan mount Flask
+# Definisikan rute untuk Starlette
 routes = [
-    Mount('/', app=WSGIMiddleware(flask_app))
+    Route('/', health_check, methods=['GET']),
+    Route('/webhook', webhook, methods=['POST'])
 ]
 app = Starlette(routes=routes, lifespan=lifespan)
 
@@ -410,21 +426,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-@flask_app.route('/')
-def index():
-    return "Bot is running!", 200
 
-@flask_app.route('/webhook', methods=['POST'])
-async def webhook():
-    try:
-        update_data = request.get_json()
-        logger.info(f"Webhook received data: {update_data}")
-        update = Update.de_json(update_data, application.bot)
-        await application.process_update(update)
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        return "Error", 500
 
 def setup_bot():
     """Mengatur semua handler dan job queue untuk bot."""
