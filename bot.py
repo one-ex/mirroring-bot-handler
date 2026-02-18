@@ -408,13 +408,16 @@ def setup_bot():
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
-    """Mengatur webhook Telegram."""
-    WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL')
-    if WEBHOOK_URL:
-        await application.bot.set_webhook(f"{WEBHOOK_URL}/webhook")
-        logger.info(f"Webhook has been set to {WEBHOOK_URL}/webhook")
-    else:
-        logger.warning("RENDER_EXTERNAL_URL is not set. Webhook cannot be set automatically.")
+    """Menginisialisasi aplikasi dan mengatur webhook."""
+    try:
+        await application.initialize()
+        url = f"https://{WEBHOOK_HOST}/webhook"
+        if await application.bot.set_webhook(url):
+            logger.info(f"Webhook has been set to `{url}`")
+        else:
+            logger.error(f"Failed to set webhook to `{url}`")
+    except Exception as e:
+        logger.error(f"Error during webhook setup: {e}")
 
 # --- Main Execution ---
 if __name__ == '__main__':
