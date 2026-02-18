@@ -5,7 +5,7 @@ import requests
 import asyncio
 from urllib.parse import urlparse
 from flask import Flask, request
-from telegram import Update, MessageEntity
+from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
 # Logging
@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 
 # Variabel Lingkungan & Konfigurasi
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+if not TELEGRAM_TOKEN:
+    raise ValueError("Tidak ada TELEGRAM_TOKEN ditemukan di environment variables")
+
+WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
+if not WEBHOOK_HOST:
+    raise ValueError("Tidak ada RENDER_EXTERNAL_URL ditemukan di environment variables")
+
 GOFILE_API_URL = os.getenv('GOFILE_API_URL')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
