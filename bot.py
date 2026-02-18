@@ -4,9 +4,8 @@ import re
 import requests
 import asyncio
 from urllib.parse import urlparse
-from threading import Thread
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
+from flask import Flask, request
+from telegram import Update, MessageEntity
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
 # Logging
@@ -37,9 +36,10 @@ def format_bytes(size: int) -> str:
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def format_job_progress(job_info: dict, status_info: dict) -> str:
-    """Formats the progress display for a single job."""
+def format_job_progress(job_info: dict, status_info: dict) -> dict:
+    """Formats the progress display for a single job and returns text + keyboard."""
     
+    job_id = status_info.get('job_id', 'N/A')
     file_name = job_info['file_info']['filename']
     if len(file_name) > 20:
         file_name = file_name[:17] + "..."
@@ -51,12 +51,12 @@ def format_job_progress(job_info: dict, status_info: dict) -> str:
     eta = status_info.get('estimasi', 0)
 
     # Progress Bar
-    bar_length = 25
+    bar_length = 20
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"🆔 **Jobs ID:** `{status_info.get('job_id', 'N/A')}`\n"
+        f"🆔 **Jobs ID:** `{job_id}`\n"
         f"📄 **File Name:** `{file_name}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
@@ -65,7 +65,12 @@ def format_job_progress(job_info: dict, status_info: dict) -> str:
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`"
     )
-    return text
+    
+    keyboard = [[
+        InlineKeyboardButton("❌ Batalkan Proses", callback_data=f"stop_{job_id}")
+    ]]
+    
+    return {"text": text, "keyboard": keyboard}
 
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
@@ -138,14 +143,23 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Assume all jobs for a user share the same message_id
         message_id = jobs[0]['job_info']['message_id']
         
-        progress_texts = [format_job_progress(j['job_info'], j['status_info']) for j in jobs]
-        full_text = "\n\n- - - - - - - - - - - - - - - - - - - -\n\n".join(progress_texts)
-        
+        full_text = ""
+        all_keyboards = []
+        for i, j in enumerate(jobs):
+            progress_data = format_job_progress(j['job_info'], j['status_info'])
+            full_text += progress_data['text']
+            all_keyboards.extend(progress_data['keyboard'])
+            if i < len(jobs) - 1:
+                full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+
+        reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+
         try:
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=full_text,
+                reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
         except Exception as e:
@@ -294,6 +308,45 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data.clear()
     return ConversationHandler.END
 
+async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the 'stop' button press to cancel a mirror job."""
+    query = update.callback_query
+    await query.answer(text="⏳ Mengirim permintaan pembatalan...")
+
+    job_id = query.data.split('_')[1]
+
+    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
+        await query.edit_message_text("❌ Job tidak lagi aktif atau sudah selesai.", reply_markup=None)
+        return
+
+    job_info = context.bot_data['active_mirrors'][job_id]
+    service = job_info['service']
+    
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    api_url = service_map.get(service)
+
+    if not api_url:
+        await query.edit_message_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.", reply_markup=None)
+        return
+
+    try:
+        response = requests.post(f"{api_url}/stop/{job_id}", timeout=10)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            # Hapus job dari daftar aktif
+            del context.bot_data['active_mirrors'][job_id]
+            await query.answer(text="✅ Permintaan pembatalan berhasil dikirim!")
+            # Panggil update_progress secara manual untuk segera memperbarui dasbor
+            await update_progress(context)
+        else:
+            await query.answer(text=f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+    except requests.RequestException as e:
+        logger.error(f"Error stopping job {job_id}: {e}")
+        await query.answer(text="❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
     query = update.callback_query
@@ -306,35 +359,16 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-def run_web_server():
-    """Menjalankan web server Flask sederhana untuk memenuhi persyaratan Render."""
-    app = Flask(__name__)
-    
-    @app.route('/')
-    def index():
-        return "Bot is running!", 200
-        
-    # Render menyediakan port melalui env var PORT
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
-
 def main() -> None:
-    """Jalankan bot."""
-    # Jalankan web server di thread terpisah
-    web_thread = Thread(target=run_web_server)
-    web_thread.daemon = True
-    web_thread.start()
-    logger.info("Web server untuk Render Health Check telah dijalankan.")
-
+    """Jalankan bot dalam mode webhook."""
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    # Initialize bot_data
+    # Initialize bot_data dan JobQueue
     application.bot_data['active_mirrors'] = {}
-
-    # Start the global poller
     job_queue = application.job_queue
     job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=1)
 
+    # Daftarkan semua handler
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & (filters.Entity(MessageEntity.URL) | filters.Entity(MessageEntity.TEXT_LINK)), url_handler)],
         states={
@@ -348,12 +382,40 @@ def main() -> None:
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    
-    logger.info("Bot is running...")
-    application.run_polling()
+    application.add_handler(CallbackQueryHandler(stop_mirror_handler, pattern='^stop_'))
+
+    # Inisialisasi Flask App
+    app = Flask(__name__)
+
+    @app.route('/')
+    def index():
+        return "Bot is running!", 200
+
+    @app.route('/webhook', methods=['POST'])
+    async def webhook():
+        try:
+            update = Update.de_json(await request.get_json(), application.bot)
+            await application.process_update(update)
+            return "OK", 200
+        except Exception as e:
+            logger.error(f"Error processing webhook: {e}")
+            return "Error", 500
+
+    # Set webhook
+    # URL ini harus Anda dapatkan dari dasbor Render Anda
+    WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL')
+    if WEBHOOK_URL:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(application.bot.set_webhook(f"{WEBHOOK_URL}/webhook"))
+        logger.info(f"Webhook telah diatur ke {WEBHOOK_URL}/webhook")
+    else:
+        logger.warning("RENDER_EXTERNAL_URL tidak diatur. Webhook tidak dapat diatur secara otomatis.")
+
+    # Jalankan server Flask
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
 
 if __name__ == '__main__':
     main()
