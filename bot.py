@@ -67,14 +67,13 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"📄 **File Name:** `{file_name}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
-        f"〚{bar}〛\n"
-        f"✅ **Complete:** `{progress:.1f}%`\n"
+        f"〚{bar}〛 {progress:.1f}%\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`"
     )
     
     keyboard = [[
-        InlineKeyboardButton("❌ Batalkan Proses", callback_data=f"stop_{job_id}")
+        InlineKeyboardButton("❌ Cancel Mirror", callback_data=f"stop_{job_id}")
     ]]
     
     return {"text": text, "keyboard": keyboard}
