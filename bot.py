@@ -19,8 +19,11 @@ PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 1  # Detik
 
+from asgiref.wsgi import WsgiToAsgi
+
 # --- Inisialisasi Global ---
-app = Flask(__name__)
+flask_app = Flask(__name__)
+app = WsgiToAsgi(flask_app)
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 
 # Tahapan untuk ConversationHandler
@@ -367,10 +370,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 def index():
     return "Bot is running!", 200
 
-@app.route('/webhook', methods=['POST'])
+@flask_app.route('/webhook', methods=['POST'])
 async def webhook():
     try:
-        update_data = request.get_json()
+        update_data = await request.get_json()
         update = Update.de_json(update_data, application.bot)
         await application.process_update(update)
         return "OK", 200
@@ -415,24 +418,24 @@ async def setup_webhook():
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # Atur bot
     setup_bot()
-    
-    # Atur webhook dalam event loop
+    # Jalankan setup_webhook dalam event loop yang ada atau yang baru
     loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(setup_webhook())
-    except Exception as e:
-        logger.error(f"Failed to set up webhook: {e}")
-
-    # Jalankan server Flask untuk pengembangan lokal
-    # Gunicorn akan menjalankan 'app' secara langsung di produksi
+    if loop.is_running():
+        loop.create_task(setup_webhook())
+    else:
+        try:
+            loop.run_until_complete(setup_webhook())
+        except Exception as e:
+            logger.error(f"Failed to set up webhook: {e}")
+    
+    # Menjalankan server pengembangan Flask
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    # Gunakan flask_app untuk menjalankan server pengembangan, bukan app (pembungkus ASGI)
+    flask_app.run(host='0.0.0.0', port=port)
 else:
-    # Atur bot saat Gunicorn mengimpor file ini
+    # Logika untuk lingkungan produksi (seperti Gunicorn)
     setup_bot()
-    # Atur webhook saat Gunicorn memulai
     loop = asyncio.get_event_loop()
     if loop.is_running():
         loop.create_task(setup_webhook())
