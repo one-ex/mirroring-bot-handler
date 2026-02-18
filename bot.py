@@ -177,6 +177,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 for job_status in jobs:
                     job_status['service'] = service
                     all_statuses[job_status['job_id']] = job_status
+                    logger.debug(f"Job {job_status['job_id']}: {job_status.get('status')} - {job_status.get('progress')}% - {job_status.get('speed_mbps')} MB/s")
         except requests.RequestException as e:
             logger.warning(f"Could not fetch status from {service}: {e}")
         except Exception as e:
@@ -248,6 +249,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             
             continue
 
+        # Validasi data progress
+        if 'progress' not in status_info:
+            status_info['progress'] = 0
+        if 'speed_mbps' not in status_info:
+            status_info['speed_mbps'] = 0
+        if 'estimasi' not in status_info:
+            status_info['estimasi'] = 0
+
         # Job masih aktif, tambahkan ke daftar untuk diupdate
         if chat_id not in jobs_by_user:
             jobs_by_user[chat_id] = []
@@ -277,14 +286,60 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         all_keyboards = []
         
         for i, job_data in enumerate(jobs):
-            progress_data = format_job_progress(
-                job_data['job_info'], 
-                job_data['status_info'],
-                job_index=i,
-                total_jobs=total_jobs
+            # Format progress dengan data terbaru
+            status_info = job_data['status_info']
+            job_info = job_data['job_info']
+            
+            # Buat progress bar
+            progress = status_info.get('progress', 0)
+            speed = status_info.get('speed_mbps', 0)
+            eta = status_info.get('estimasi', 0)
+            
+            # Format nama file
+            file_name = job_info['file_info']['filename']
+            if len(file_name) > 25:
+                file_name = file_name[:22] + "..."
+            
+            # Ikon service
+            service_icon = "📁" if job_info['service'] == 'gofile' else "💧"
+            service_name = "GoFile" if job_info['service'] == 'gofile' else "PixelDrain"
+            
+            # Progress bar visual
+            bar_length = 15
+            filled = int(bar_length * progress / 100)
+            bar = '█' * filled + '░' * (bar_length - filled)
+            
+            # Format ETA
+            if eta > 0:
+                if eta > 3600:
+                    eta_str = f"{eta/3600:.1f}h"
+                elif eta > 60:
+                    eta_str = f"{eta/60:.1f}m"
+                else:
+                    eta_str = f"{eta}s"
+            else:
+                eta_str = "calculating..."
+            
+            # Status text
+            status_text = status_info.get('status', 'unknown').capitalize()
+            
+            # Build job text
+            job_text = (
+                f"{service_icon} **{service_name}**\n"
+                f"📄 **File:** `{file_name}`\n"
+                f"💾 **Size:** {job_info['file_info']['formatted_size']}\n"
+                f"⚙️ **Status:** `{status_text}`\n"
+                f"〚{bar}〛 `{progress:.1f}%`\n"
+                f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
+                f"⏳ **ETA:** `{eta_str}`"
             )
-            full_text += progress_data['text']
-            all_keyboards.extend(progress_data['keyboard'])
+            
+            full_text += job_text
+            
+            # Tombol cancel
+            all_keyboards.append([
+                InlineKeyboardButton(f"❌ Cancel Job #{i+1}", callback_data=f"stop_{status_info.get('job_id')}")
+            ])
             
             # Tambah pemisah antar jobs
             if i < total_jobs - 1:
@@ -300,7 +355,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
-            logger.info(f"Updated dashboard for chat {chat_id} with {total_jobs} jobs")
+            logger.info(f"✅ Updated dashboard for chat {chat_id} with {total_jobs} jobs")
         except Exception as e:
             logger.warning(f"Failed to edit message for chat {chat_id}: {e}")
             
@@ -315,16 +370,17 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 
                 # Update semua job dengan message_id baru
                 for job_data in jobs:
-                    job_id = job_data['job_info'].get('job_id')
-                    if job_id in context.bot_data['active_mirrors']:
-                        context.bot_data['active_mirrors'][job_id]['message_id'] = new_msg.message_id
+                    current_job_id = job_data['status_info'].get('job_id')
+                    if current_job_id in context.bot_data['active_mirrors']:
+                        context.bot_data['active_mirrors'][current_job_id]['message_id'] = new_msg.message_id
                 
                 logger.info(f"Created new dashboard message for chat {chat_id}")
             except Exception as e2:
                 logger.error(f"Failed to create new message for chat {chat_id}: {e2}")
     
     elapsed = time.time() - start_time
-    logger.debug(f"Update progress completed in {elapsed:.2f}s")
+    if elapsed > 1.0:
+        logger.warning(f"Update progress took {elapsed:.2f}s")
 
 # --- Fungsi Utama Bot ---
 
