@@ -373,6 +373,7 @@ def index():
 async def webhook():
     try:
         update_data = request.get_json()
+        logger.info(f"Webhook received data: {update_data}")
         update = Update.de_json(update_data, application.bot)
         await application.process_update(update)
         return "OK", 200
