@@ -143,15 +143,27 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     all_statuses = {}
     service_urls = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
     
+    tasks = []
     for service, base_url in service_urls.items():
         if not base_url: continue
-        try:
-            r = requests.get(f"{base_url}/status/all", timeout=10)
-            if r.status_code == 200:
-                for job_status in r.json().get('active_jobs', []):
+        tasks.append(async_client.get(f"{base_url}/status/all", timeout=10))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        service = list(service_urls.keys())[i]
+        if isinstance(result, httpx.RequestError):
+            logger.warning(f"Could not fetch status from {service}: {result}")
+        elif isinstance(result, Exception):
+            logger.error(f"Unexpected error fetching status from {service}: {result}")
+        elif result.status_code == 200:
+            try:
+                for job_status in result.json().get('active_jobs', []):
                     all_statuses[job_status['job_id']] = job_status
-        except requests.RequestException as e:
-            logger.warning(f"Could not fetch status from {service}: {e}")
+            except Exception as e:
+                logger.error(f"Error parsing JSON from {service}: {e}")
+        else:
+            logger.warning(f"Status fetch from {service} returned status {result.status_code}")
 
     # Group active jobs by user (chat_id)
     jobs_by_user = {}
