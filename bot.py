@@ -417,8 +417,11 @@ def setup_bot():
 async def setup_webhook():
     """Menginisialisasi aplikasi dan mengatur webhook."""
     try:
+        # Pastikan host tidak memiliki skema http/https untuk menghindari duplikasi
+        clean_host = WEBHOOK_HOST.replace("https://", "").replace("http://", "")
+        url = f"https://{clean_host}/webhook"
+        
         await application.initialize()
-        url = f"https://{WEBHOOK_HOST}/webhook"
         if await application.bot.set_webhook(url):
             logger.info(f"Webhook has been set to `{url}`")
         else:
