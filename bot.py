@@ -252,11 +252,15 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             
             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
-        try:
-            # Only edit if the content needs to change
-            current_message = await bot.get_message(chat_id, message_id)
-            if current_message.text != full_text:
-                 await bot.edit_message_text(
+        # Get the last known state for this dashboard to avoid API spam
+        if 'dashboard_state' not in context.bot_data:
+            context.bot_data['dashboard_state'] = {}
+        last_text = context.bot_data['dashboard_state'].get(chat_id)
+
+        # Only edit if the content has changed
+        if last_text != full_text:
+            try:
+                await bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=full_text,
@@ -264,13 +268,22 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode='Markdown',
                     disable_web_page_preview=True
                 )
-        except Exception as e:
-            logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
+                # Update the state after successful edit
+                context.bot_data['dashboard_state'][chat_id] = full_text
+            except Exception as e:
+                logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
 
     # Clean up finished jobs from the active list
     for job_id in finished_jobs_to_remove:
         if job_id in context.bot_data['active_mirrors']:
             del context.bot_data['active_mirrors'][job_id]
+
+    # Also clean up dashboard state for users with no active jobs
+    if 'dashboard_state' in context.bot_data:
+        active_chat_ids = {job['chat_id'] for job in context.bot_data['active_mirrors'].values()}
+        stale_chat_ids = [chat_id for chat_id in context.bot_data['dashboard_state'] if chat_id not in active_chat_ids]
+        for chat_id in stale_chat_ids:
+            del context.bot_data['dashboard_state'][chat_id]
 
 
 # --- Fungsi Utama Bot ---
