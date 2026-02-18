@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from flask import Flask, request
 from starlette.applications import Starlette
-from starlette.middleware import Middleware
+from starlette.routing import Mount
 from starlette.middleware.wsgi import WSGIMiddleware
 from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
@@ -48,10 +48,12 @@ async def lifespan(app):
     await application.stop()
     logger.info("Application has stopped.")
 
-# Buat aplikasi Starlette dengan lifespan manager
-app = Starlette(lifespan=lifespan, middleware=[
-    Middleware(WSGIMiddleware, app=flask_app)
-])
+# Buat aplikasi Starlette dengan lifespan manager dan mount Flask
+routes = [
+    Mount('/', app=WSGIMiddleware(flask_app))
+]
+app = Starlette(routes=routes, lifespan=lifespan)
+
 
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
