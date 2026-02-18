@@ -1,7 +1,7 @@
 import os
 import logging
 import re
-import requests
+import httpx
 import asyncio
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -33,10 +33,12 @@ POLLING_INTERVAL = 1  # Detik
 # --- Inisialisasi Global ---
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 flask_app = Flask(__name__)
+async_client = httpx.AsyncClient(timeout=30)
 
 @asynccontextmanager
 async def lifespan(app):
     """Lifespan manager for the application."""
+    global async_client
     logger.info("Starting application lifespan...")
     await application.initialize()
     await setup_webhook()
@@ -46,6 +48,7 @@ async def lifespan(app):
     yield
     logger.info("Stopping application lifespan...")
     await application.stop()
+    await async_client.aclose()
     logger.info("Application has stopped.")
 
 # Buat aplikasi Starlette dengan lifespan manager dan mount Flask
@@ -110,7 +113,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
     try:
-        with requests.get(url, stream=True, allow_redirects=True, timeout=15) as r:
+        async with async_client.stream("GET", url, follow_redirects=True, timeout=15) as r:
             r.raise_for_status()
             size = int(r.headers.get('content-length', 0))
             filename = "N/A"
@@ -120,10 +123,10 @@ async def get_file_info_from_url(url: str) -> dict:
                 if matches:
                     filename = matches[0]
             if filename == "N/A":
-                parsed_url = urlparse(r.url)
+                parsed_url = urlparse(str(r.url))
                 filename = os.path.basename(parsed_url.path) or "downloaded_file"
             return {"success": True, "filename": filename, "size": size, "formatted_size": format_bytes(size)}
-    except requests.exceptions.RequestException as e:
+    except httpx.RequestError as e:
         logger.error(f"Error getting file info for {url}: {e}")
         return {"success": False, "error": "Gagal mengakses URL. Pastikan URL valid dan dapat diakses."}
     except Exception as e:
@@ -302,7 +305,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
 
     try:
-        response = requests.post(f"{api_url}/mirror", json={'url': url}, timeout=15)
+        response = await async_client.post(f"{api_url}/mirror", json={'url': url}, timeout=15)
         response.raise_for_status()
         result = response.json()
 
@@ -337,7 +340,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         else:
             await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
 
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
 
     context.user_data.clear()
@@ -365,20 +368,21 @@ async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     try:
-        response = requests.post(f"{api_url}/stop/{job_id}", timeout=10)
+        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
         response.raise_for_status()
         result = response.json()
 
         if result.get('success'):
             # Hapus job dari daftar aktif
-            del context.bot_data['active_mirrors'][job_id]
+            if job_id in context.bot_data['active_mirrors']:
+                del context.bot_data['active_mirrors'][job_id]
             await query.answer(text="✅ Permintaan pembatalan berhasil dikirim!")
             # Panggil update_progress secara manual untuk segera memperbarui dasbor
             await update_progress(context)
         else:
             await query.answer(text=f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
-    except requests.RequestException as e:
+    except httpx.RequestError as e:
         logger.error(f"Error stopping job {job_id}: {e}")
         await query.answer(text="❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
