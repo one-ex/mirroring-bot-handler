@@ -3,8 +3,12 @@ import logging
 import re
 import requests
 import asyncio
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from flask import Flask, request
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.wsgi import WSGIMiddleware
 from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
@@ -26,12 +30,28 @@ PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 1  # Detik
 
-from asgiref.wsgi import WsgiToAsgi
-
 # --- Inisialisasi Global ---
-flask_app = Flask(__name__)
-app = WsgiToAsgi(flask_app)
 application = Application.builder().token(TELEGRAM_TOKEN).build()
+flask_app = Flask(__name__)
+
+@asynccontextmanager
+async def lifespan(app):
+    """Lifespan manager for the application."""
+    logger.info("Starting application lifespan...")
+    await application.initialize()
+    await setup_webhook()
+    setup_bot()
+    await application.start()
+    logger.info("Application has started.")
+    yield
+    logger.info("Stopping application lifespan...")
+    await application.stop()
+    logger.info("Application has stopped.")
+
+# Buat aplikasi Starlette dengan lifespan manager
+app = Starlette(lifespan=lifespan, middleware=[
+    Middleware(WSGIMiddleware, app=flask_app)
+])
 
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
@@ -65,7 +85,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     eta = status_info.get('estimasi', 0)
 
     # Progress Bar
-    bar_length = 20
+    bar_length = 25
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
@@ -74,7 +94,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"📄 **File Name:** `{file_name}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
-        f"〚{bar}〛 {progress:.1f}%\n"
+        f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`"
     )
@@ -421,36 +441,9 @@ async def setup_webhook():
         clean_host = WEBHOOK_HOST.replace("https://", "").replace("http://", "")
         url = f"https://{clean_host}/webhook"
         
-        await application.initialize()
         if await application.bot.set_webhook(url):
             logger.info(f"Webhook has been set to `{url}`")
         else:
             logger.error(f"Failed to set webhook to `{url}`")
     except Exception as e:
         logger.error(f"Error during webhook setup: {e}")
-
-# --- Main Execution ---
-if __name__ == '__main__':
-    setup_bot()
-    # Jalankan setup_webhook dalam event loop yang ada atau yang baru
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(setup_webhook())
-    else:
-        try:
-            loop.run_until_complete(setup_webhook())
-        except Exception as e:
-            logger.error(f"Failed to set up webhook: {e}")
-    
-    # Menjalankan server pengembangan Flask
-    port = int(os.environ.get('PORT', 8080))
-    # Gunakan flask_app untuk menjalankan server pengembangan, bukan app (pembungkus ASGI)
-    flask_app.run(host='0.0.0.0', port=port)
-else:
-    # Logika untuk lingkungan produksi (seperti Gunicorn)
-    setup_bot()
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(setup_webhook())
-    else:
-        loop.run_until_complete(setup_webhook())
