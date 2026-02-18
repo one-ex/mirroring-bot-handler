@@ -372,7 +372,7 @@ def index():
 @flask_app.route('/webhook', methods=['POST'])
 async def webhook():
     try:
-        update_data = await request.get_json()
+        update_data = request.get_json()
         update = Update.de_json(update_data, application.bot)
         await application.process_update(update)
         return "OK", 200
