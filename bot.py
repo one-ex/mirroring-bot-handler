@@ -104,6 +104,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     progress = status_info.get('progress', 0)
     speed = status_info.get('speed_mbps', 0)
     eta = status_info.get('estimasi', 0)
+    download_url = status_info.get('download_url')
 
     # Progress Bar
     bar_length = 25
@@ -115,14 +116,24 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"📄 **File Name:** `{file_name}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
-        f"〚{bar}〛`{progress:.1f}%`\n"
-        f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-        f"⏳ **Estimation:** `{eta} Sec`"
     )
-    
-    keyboard = [[
-        InlineKeyboardButton("❌ Cancel Mirror", callback_data=f"stop_{job_id}")
-    ]]
+
+    keyboard = []
+    if status in ['Completed', 'Sukses']:
+        text += f"✅ **Selesai!**\n"
+        if download_url:
+            text += f"🔗 **Link:** {download_url}"
+    elif status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
+        text += f"❌ **Gagal!**"
+    else:
+        text += (
+            f"〚{bar}〛`{progress:.1f}%`\n"
+            f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
+            f"⏳ **Estimation:** `{eta} Sec`"
+        )
+        keyboard.append([
+            InlineKeyboardButton("❌ Cancel Mirror", callback_data=f"stop_{job_id}")
+        ])
     
     return {"text": text, "keyboard": keyboard}
 
@@ -181,44 +192,58 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             logger.warning(f"Status fetch from {service} returned status {result.status_code}")
 
-    # Group active jobs by user (chat_id)
+    # Group active jobs by user (chat_id) and prepare for updates
     jobs_by_user = {}
     if 'active_mirrors' not in context.bot_data:
         context.bot_data['active_mirrors'] = {}
 
-    # Use a copy to prevent issues with modifying dict during iteration
+    finished_jobs = []
+
     for job_id, job_info in list(context.bot_data['active_mirrors'].items()):
         chat_id = job_info['chat_id']
         if chat_id not in jobs_by_user:
-            jobs_by_user[chat_id] = []
+            jobs_by_user[chat_id] = {'jobs': [], 'message_id': job_info['message_id']}
         
         status_info = all_statuses.get(job_id)
         
-        # If job is no longer reported by server, assume it's done or failed
-        if not status_info or status_info.get('status') in ['completed', 'failed', 'cancelled']:
-            # Remove from active list
-            del context.bot_data['active_mirrors'][job_id]
-            continue # Don't display it in the next update
-            
-        jobs_by_user[chat_id].append({'job_info': job_info, 'status_info': status_info})
+        # If job is no longer reported by the server, treat it as completed/failed.
+        if not status_info:
+            status_info = {'status': 'completed'} # Assume completed if disappears
+        
+        jobs_by_user[chat_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
+        
+        # Mark job as finished to be removed after this update cycle
+        if status_info.get('status') in ['completed', 'failed', 'cancelled']:
+            finished_jobs.append(job_id)
 
     # Update message for each user
-    for chat_id, jobs in jobs_by_user.items():
-        if not jobs: continue
+    for chat_id, user_data in jobs_by_user.items():
+        jobs = user_data['jobs']
+        message_id = user_data['message_id']
         
-        # Assume all jobs for a user share the same message_id
-        message_id = jobs[0]['job_info']['message_id']
+        if not jobs: continue
         
         full_text = ""
         all_keyboards = []
+        active_job_count = 0
         for i, j in enumerate(jobs):
             progress_data = format_job_progress(j['job_info'], j['status_info'])
             full_text += progress_data['text']
-            all_keyboards.extend(progress_data['keyboard'])
+            
+            # Only add keyboard for active jobs
+            if j['status_info'].get('status') not in ['completed', 'failed', 'cancelled']:
+                all_keyboards.extend(progress_data['keyboard'])
+                active_job_count += 1
+
             if i < len(jobs) - 1:
                 full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
 
-        reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+        # If there are no more active jobs, the dashboard is empty.
+        if active_job_count == 0:
+             full_text += "\n\n🏁 Semua pekerjaan selesai."
+             reply_markup = None
+        else:
+             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
         try:
             await bot.edit_message_text(
@@ -226,11 +251,16 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 message_id=message_id,
                 text=full_text,
                 reply_markup=reply_markup,
-                parse_mode='Markdown'
+                parse_mode='Markdown',
+                disable_web_page_preview=True
             )
         except Exception as e:
-            # Could fail if message is old or deleted
             logger.warning(f"Failed to edit message for chat {chat_id}: {e}")
+
+    # Clean up finished jobs from the active list
+    for job_id in finished_jobs:
+        if job_id in context.bot_data['active_mirrors']:
+            del context.bot_data['active_mirrors'][job_id]
 
 
 # --- Fungsi Utama Bot ---
