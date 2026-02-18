@@ -366,7 +366,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-@app.route('/')
+@flask_app.route('/')
 def index():
     return "Bot is running!", 200
 
