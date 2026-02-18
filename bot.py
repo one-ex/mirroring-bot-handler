@@ -197,7 +197,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     if 'active_mirrors' not in context.bot_data:
         context.bot_data['active_mirrors'] = {}
 
-    finished_jobs = []
+    finished_jobs_to_remove = []
 
     for job_id, job_info in list(context.bot_data['active_mirrors'].items()):
         chat_id = job_info['chat_id']
@@ -206,59 +206,69 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         
         status_info = all_statuses.get(job_id)
         
-        # If job is no longer reported by the server, treat it as completed/failed.
+        # If job is no longer reported by the server, assume it's done.
         if not status_info:
-            status_info = {'status': 'completed'} # Assume completed if disappears
+            status_info = {'status': 'completed'}
         
-        jobs_by_user[chat_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
-        
-        # Mark job as finished to be removed after this update cycle
+        # Handle finished jobs: send a separate message and mark for removal
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
-            finished_jobs.append(job_id)
+            finished_jobs_to_remove.append(job_id)
+            
+            # Format a final message for the completed job
+            final_message_data = format_job_progress(job_info, status_info)
+            try:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=final_message_data['text'],
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
+        else:
+            # If the job is still active, add it to the dashboard update list
+            jobs_by_user[chat_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
 
-    # Update message for each user
+    # Update the main dashboard message for each user
     for chat_id, user_data in jobs_by_user.items():
-        jobs = user_data['jobs']
+        active_jobs = user_data['jobs']
         message_id = user_data['message_id']
-        
-        if not jobs: continue
         
         full_text = ""
         all_keyboards = []
-        active_job_count = 0
-        for i, j in enumerate(jobs):
-            progress_data = format_job_progress(j['job_info'], j['status_info'])
-            full_text += progress_data['text']
-            
-            # Only add keyboard for active jobs
-            if j['status_info'].get('status') not in ['completed', 'failed', 'cancelled']:
-                all_keyboards.extend(progress_data['keyboard'])
-                active_job_count += 1
-
-            if i < len(jobs) - 1:
-                full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
-
-        # If there are no more active jobs, the dashboard is empty.
-        if active_job_count == 0:
-             full_text += "\n\n🏁 Semua pekerjaan selesai."
-             reply_markup = None
+        
+        if not active_jobs:
+            full_text = "🏁 Semua pekerjaan selesai."
+            reply_markup = None
         else:
-             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+            full_text = "📊 Dasbor Progres Aktif:\n\n"
+            for i, j in enumerate(active_jobs):
+                progress_data = format_job_progress(j['job_info'], j['status_info'])
+                full_text += progress_data['text']
+                all_keyboards.extend(progress_data['keyboard'])
+
+                if i < len(active_jobs) - 1:
+                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+            
+            reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
         try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=full_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown',
-                disable_web_page_preview=True
-            )
+            # Only edit if the content needs to change
+            current_message = await bot.get_message(chat_id, message_id)
+            if current_message.text != full_text:
+                 await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=full_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
         except Exception as e:
-            logger.warning(f"Failed to edit message for chat {chat_id}: {e}")
+            logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
 
     # Clean up finished jobs from the active list
-    for job_id in finished_jobs:
+    for job_id in finished_jobs_to_remove:
         if job_id in context.bot_data['active_mirrors']:
             del context.bot_data['active_mirrors'][job_id]
 
