@@ -91,8 +91,8 @@ def format_bytes(size: int) -> str:
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def format_job_progress(job_info: dict, status_info: dict, bot_username: str = None) -> str:
-    """Formats the progress display for a single job and returns text."""
+def format_job_progress(job_info: dict, status_info: dict) -> str:
+    """Formats the progress display for a single job and returns HTML text."""
     
     job_id = status_info.get('job_id', 'N/A')
     file_name = job_info['file_info']['filename']
@@ -112,27 +112,26 @@ def format_job_progress(job_info: dict, status_info: dict, bot_username: str = N
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name}`\n"
-        f"💾 **Size:** `{size}`\n"
-        f"⚙️ **Status:** `{status}`\n"
+        f"🆔 <b>Jobs ID:</b> <code>{job_id}</code>\n"
+        f"📄 <b>File Name:</b> <code>{file_name}</code>\n"
+        f"💾 <b>Size:</b> <code>{size}</code>\n"
+        f"⚙️ <b>Status:</b> <code>{status}</code>\n"
     )
 
     if status in ['Completed', 'Sukses']:
-        text += f"✅ **Selesai!**\n"
+        text += f"✅ <b>Selesai!</b>\n"
         if download_url:
-            text += f"🔗 **Link:** {download_url}"
+            text += f"🔗 <b>Link:</b> {download_url}"
     elif status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
-        text += f"❌ **Gagal!**"
+        text += f"❌ <b>Gagal!</b>"
     else:
         text += (
-            f"〚{bar}〛`{progress:.1f}%`\n"
-            f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-            f"⏳ **Estimation:** `{eta} Sec`\n"
+            f"〚{bar}〛<code>{progress:.1f}%</code>\n"
+            f"🚀 <b>Speed:</b> <code>{speed:.2f} MB/s</code>\n"
+            f"⏳ <b>Estimation:</b> <code>{eta} Sec</code>\n\n"
         )
-        # Tambahkan tombol Cancel sebagai teks yang bisa diklik
-        if bot_username:
-            text += f"[🚫 Cancel](https://t.me/{bot_username}?start=cancel_{job_id})"
+        # Tambahkan tombol Cancel sebagai teks link dengan fake URL
+        text += f'<a href="https://cancel.internal/{job_id}">🚫 Cancel Mirror</a>'
     
     return text
 
@@ -164,7 +163,6 @@ async def get_file_info_from_url(url: str) -> dict:
 async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The global poller task to update all active jobs."""
     bot = context.bot
-    bot_username = bot.username
     
     # Fetch status from both services
     all_statuses = {}
@@ -215,12 +213,12 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             finished_jobs_to_remove.append(job_id)
             
             # Format a final message for the completed job
-            final_message = format_job_progress(job_info, status_info, bot_username)
+            final_message = format_job_progress(job_info, status_info)
             try:
                 await bot.send_message(
                     chat_id=chat_id,
                     text=final_message,
-                    parse_mode='Markdown',
+                    parse_mode='HTML',
                     disable_web_page_preview=True
                 )
             except Exception as e:
@@ -239,9 +237,9 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not active_jobs:
             full_text = "🏁 Semua pekerjaan selesai."
         else:
-            full_text = "📊 **Mirroring Process:**\n\n"
+            full_text = "📊 <b>Mirroring Process:</b>\n\n"
             for i, j in enumerate(active_jobs):
-                full_text += format_job_progress(j['job_info'], j['status_info'], bot_username)
+                full_text += format_job_progress(j['job_info'], j['status_info'])
 
                 if i < len(active_jobs) - 1:
                     full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
@@ -258,7 +256,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     chat_id=chat_id,
                     message_id=message_id,
                     text=full_text,
-                    parse_mode='Markdown',
+                    parse_mode='HTML',
                     disable_web_page_preview=True
                 )
                 # Update the state after successful edit
@@ -292,35 +290,54 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=None,
     )
 
-async def handle_deep_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler untuk deep link (start dengan parameter)."""
+async def handle_cancel_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler untuk menangkap klik pada link cancel di dalam pesan."""
+    message = update.message
     user = update.effective_user
     
     # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+    #     await message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
     #     return
     
-    if context.args and context.args[0].startswith('cancel_'):
-        job_id = context.args[0].replace('cancel_', '')
-        await handle_cancel_by_id(update, context, job_id)
-    else:
-        # Jika tidak ada parameter atau parameter tidak dikenal, jalankan start biasa
-        await start(update, context)
+    # Cari entitas TEXT_LINK dalam pesan
+    text_link_entities = message.parse_entities(types=[MessageEntity.TEXT_LINK])
+    
+    for entity, url in text_link_entities.items():
+        # Periksa apakah URL diawali dengan fake URL kita
+        if url.startswith('https://cancel.internal/'):
+            # Ekstrak job_id dari URL
+            job_id = url.replace('https://cancel.internal/', '')
+            
+            # Hapus pesan yang berisi link (pesan "/start cancel_job_id" atau pesan lainnya)
+            try:
+                await message.delete()
+            except Exception as e:
+                logger.warning(f"Tidak dapat menghapus pesan: {e}")
+            
+            # Proses pembatalan
+            await perform_cancel(update, context, job_id)
+            return
 
-async def handle_cancel_by_id(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str) -> None:
-    """Menangani pembatalan job melalui deep link."""
+async def perform_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str) -> None:
+    """Melakukan pembatalan job."""
     user = update.effective_user
     
     # Verifikasi bahwa job ini milik user yang sama
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
-        await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="❌ Job tidak lagi aktif atau sudah selesai."
+        )
         return
 
     job_info = context.bot_data['active_mirrors'][job_id]
     
     # Pastikan user yang membatalkan adalah pemilik job
     if job_info['chat_id'] != user.id:
-        await update.message.reply_text("🚫 Anda tidak memiliki izin untuk membatalkan job ini.")
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="🚫 Anda tidak memiliki izin untuk membatalkan job ini."
+        )
         return
 
     service = job_info['service']
@@ -328,11 +345,17 @@ async def handle_cancel_by_id(update: Update, context: ContextTypes.DEFAULT_TYPE
     api_url = service_map.get(service)
 
     if not api_url:
-        await update.message.reply_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="❌ Layanan untuk job ini tidak dikonfigurasi dengan benar."
+        )
         return
 
-    # Kirim pesan bahwa pembatalan sedang diproses
-    status_message = await update.message.reply_text("⏳ Mengirim permintaan pembatalan...")
+    # Kirim pesan bahwa pembatalan sedang diproses (akan dihapus setelah selesai)
+    status_message = await context.bot.send_message(
+        chat_id=user.id,
+        text="⏳ Mengirim permintaan pembatalan..."
+    )
 
     try:
         response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
@@ -345,6 +368,16 @@ async def handle_cancel_by_id(update: Update, context: ContextTypes.DEFAULT_TYPE
                 del context.bot_data['active_mirrors'][job_id]
             
             await status_message.edit_text("✅ Permintaan pembatalan berhasil dikirim!")
+            
+            # Jadwalkan penghapusan pesan status setelah 3 detik
+            async def delete_status_message(context: ContextTypes.DEFAULT_TYPE):
+                try:
+                    await status_message.delete()
+                except:
+                    pass
+            
+            context.job_queue.run_once(delete_status_message, 3)
+            
             # Panggil update_progress secara manual untuk segera memperbarui dasbor
             await update_progress(context)
         else:
@@ -399,12 +432,12 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await processing_message.edit_text(
-        f"📜 **Info File:**\n"
-        f"**Nama:** `{info['filename']}`\n"
-        f"**Ukuran:** `{info['formatted_size']}`\n\n"
+        f"📜 <b>Info File:</b>\n"
+        f"<b>Nama:</b> <code>{info['filename']}</code>\n"
+        f"<b>Ukuran:</b> <code>{info['formatted_size']}</code>\n\n"
         f"Lanjutkan proses mirroring?",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
     
     return SELECTING_ACTION
@@ -462,7 +495,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 await query.message.delete() # delete the selection message
             else:
                 # This is the first job for this user, edit the current message to be the dashboard
-                await query.edit_message_text("📊 **Mirroring Process:**", parse_mode='Markdown')
+                await query.edit_message_text("📊 <b>Mirroring Process:</b>", parse_mode='HTML')
                 message_id = query.message.message_id
 
             # Store job info
@@ -516,8 +549,13 @@ def setup_bot():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
     
-    # Handler untuk deep link (start dengan parameter) - harus didahulukan
-    application.add_handler(CommandHandler("start", handle_deep_link))
+    # Handler untuk menangkap klik pada link cancel di dalam pesan
+    application.add_handler(MessageHandler(
+        filters.TEXT & filters.Entity(MessageEntity.TEXT_LINK), 
+        handle_cancel_link
+    ))
+    
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     
     logger.info("Bot handlers and job queue have been set up.")
