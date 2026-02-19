@@ -138,7 +138,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel:** /stop_{job_id}"
+        f"🚫 **Cancel:** /c{job_id.replace('-', '')}"
     )
 
     # Keyboard is no longer used for active jobs
@@ -454,9 +454,17 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop_<job_id> command to cancel a mirror job."""
-    job_id = update.message.text.split('_')[1]
+    """Handles the /c<job_id> command to cancel a mirror job."""
+    job_id_compressed = update.message.text[2:] # Remove /c
     
+    # Reconstruct the original job_id with hyphens
+    # UUID format is 8-4-4-4-12
+    try:
+        job_id = f"{job_id_compressed[0:8]}-{job_id_compressed[8:12]}-{job_id_compressed[12:16]}-{job_id_compressed[16:20]}-{job_id_compressed[20:]}"
+    except IndexError:
+        await update.message.reply_text("❌ Format Job ID untuk pembatalan tidak valid.")
+        return
+
     await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
@@ -566,7 +574,7 @@ def setup_bot():
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/c[0-9a-fA-F]{32}$'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
