@@ -248,16 +248,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            full_text = "📊 Mirroring Process:\n\n"
-            for i, j in enumerate(active_jobs):
+            # Use a list to build the text parts and join at the end
+            text_parts = ["📊 Dasbor Progres Aktif:\n"]
+            for j in active_jobs:
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
-                full_text += progress_data['text']
-                all_keyboards.extend(progress_data['keyboard'])
-
-                if i < len(active_jobs) - 1:
-                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+                text_parts.append(progress_data['text'])
             
-            reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+            full_text = "\n\n- - - - - - - - - - - - - - - - - - - -\n\n".join(text_parts)
+            reply_markup = None
 
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
