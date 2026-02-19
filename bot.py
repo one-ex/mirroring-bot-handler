@@ -79,6 +79,30 @@ app = Starlette(routes=routes, lifespan=lifespan)
 
 # --- Fungsi Pembantu ---
 
+def escape_markdown(text: str) -> str:
+    """Escape special characters for Markdown V2 formatting."""
+    # First escape backslashes, then other special characters
+    text = text.replace('\\', '\\\\')
+    text = text.replace('_', '\\_')
+    text = text.replace('*', '\\*')
+    text = text.replace('[', '\\[')
+    text = text.replace(']', '\\]')
+    text = text.replace('(', '\\(')
+    text = text.replace(')', '\\)')
+    text = text.replace('~', '\\~')
+    text = text.replace('`', '\\`')
+    text = text.replace('>', '\\>')
+    text = text.replace('#', '\\#')
+    text = text.replace('+', '\\+')
+    text = text.replace('-', '\\-')
+    text = text.replace('=', '\\=')
+    text = text.replace('|', '\\|')
+    text = text.replace('{', '\\{')
+    text = text.replace('}', '\\}')
+    text = text.replace('.', '\\.')
+    text = text.replace('!', '\\!')
+    return text
+
 def format_bytes(size: int) -> str:
     """Formats size in bytes to a human-readable string."""
     if not size or size == 0:
@@ -103,10 +127,13 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     eta = status_info.get('estimasi', 0)
     download_url = status_info.get('download_url')
 
+    # Escape special characters for Markdown
+    full_file_name_escaped = escape_markdown(full_file_name)
+    
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
+            f"📄 **File Name:** {full_file_name_escaped}\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
         if download_url:
@@ -115,7 +142,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
+            f"📄 **File Name:** {full_file_name_escaped}\n"
             f"⚙️ **Status:** {status} ❌"
         )
         return {"text": text, "keyboard": []}
@@ -124,6 +151,8 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     file_name_truncated = full_file_name
     if len(file_name_truncated) > 20:
         file_name_truncated = file_name_truncated[:17] + "..."
+    
+    file_name_truncated_escaped = escape_markdown(file_name_truncated)
 
     # Progress Bar
     bar_length = 25
@@ -132,13 +161,13 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     text = (
         f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name_truncated}`\n"
+        f"📄 **File Name:** `{file_name_truncated_escaped}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel:** /stop_{job_id}"
+        f"🚫 /stop_{job_id}"
     )
 
     # Keyboard is no longer used for active jobs
@@ -232,6 +261,17 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
             except Exception as e:
                 logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
+                # Try sending without Markdown if parsing fails
+                if "Can't parse entities" in str(e):
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=final_message_data['text'],
+                            disable_web_page_preview=True
+                        )
+                        logger.info(f"Successfully sent final status for job {job_id} to chat {chat_id} without Markdown")
+                    except Exception as fallback_error:
+                        logger.error(f"Failed to send final status for job {job_id} to chat {chat_id} even without Markdown: {fallback_error}")
         else:
             # If the job is still active, add it to the dashboard update list
             jobs_by_user[chat_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
@@ -248,16 +288,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            full_text = "📊 Mirroring Process:\n\n"
-            for i, j in enumerate(active_jobs):
+            # Use a list to build the text parts and join at the end
+            text_parts = ["📊 Dasbor Progres Aktif:\n"]
+            for j in active_jobs:
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
-                full_text += progress_data['text']
-                all_keyboards.extend(progress_data['keyboard'])
-
-                if i < len(active_jobs) - 1:
-                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+                text_parts.append(progress_data['text'])
             
-            reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+            full_text = "\n\n- - - - - - - - - - - - - - - - - - - -\n\n".join(text_parts)
+            reply_markup = None
 
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
@@ -279,6 +317,20 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 context.bot_data['dashboard_state'][chat_id] = full_text
             except Exception as e:
                 logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
+                # Try sending without Markdown if parsing fails
+                if "Can't parse entities" in str(e):
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=full_text,
+                            reply_markup=reply_markup,
+                            disable_web_page_preview=True
+                        )
+                        context.bot_data['dashboard_state'][chat_id] = full_text
+                        logger.info(f"Successfully edited dashboard for chat {chat_id} without Markdown")
+                    except Exception as fallback_error:
+                        logger.error(f"Failed to edit dashboard for chat {chat_id} even without Markdown: {fallback_error}")
 
     # Clean up finished jobs from the active list
     for job_id in finished_jobs_to_remove:
@@ -350,9 +402,12 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Escape special characters in filename for Markdown
+    filename_escaped = escape_markdown(info['filename'])
+    
     await processing_message.edit_text(
         f"📜 **Info File:**\n"
-        f"**Nama:** `{info['filename']}`\n"
+        f"**Nama:** `{filename_escaped}`\n"
         f"**Ukuran:** `{info['formatted_size']}`\n\n"
         f"Lanjutkan proses mirroring?",
         reply_markup=reply_markup,
