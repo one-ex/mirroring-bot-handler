@@ -3,6 +3,7 @@ import logging
 import re
 import httpx
 import asyncio
+from html import escape
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from starlette.applications import Starlette
