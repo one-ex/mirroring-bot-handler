@@ -132,14 +132,14 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name_truncated}`\n"
-        f"💾 **Size:** `{size}`\n"
-        f"⚙️ **Status:** `{status}`\n"
-        f"〚{bar}〛`{progress:.1f}%`\n"
-        f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-        f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel:** /c{job_id.replace('-', '')}"
+        f"🆔 <b>Jobs ID:</b> <code>{job_id}</code>\n"
+        f"📄 <b>File Name:</b> <code>{escape(file_name_truncated)}</code>\n"
+        f"💾 <b>Size:</b> <code>{size}</code>\n"
+        f"⚙️ <b>Status:</b> <code>{status}</code>\n"
+        f"〚{bar}〛<code>{progress:.1f}%</code>\n"
+        f"🚀 <b>Speed:</b> <code>{speed:.2f} MB/s</code>\n"
+        f"⏳ <b>Estimation:</b> <code>{eta} Sec</code>\n"
+        f"🚫 <b>Cancel:</b> /c{job_id.replace('-', '')}"
     )
 
     # Keyboard is no longer used for active jobs
