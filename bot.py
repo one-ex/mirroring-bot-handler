@@ -452,12 +452,8 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop <job_id> command to cancel a mirror job."""
-    try:
-        job_id = update.message.text.split(' ', 1)[1]
-    except IndexError:
-        await update.message.reply_text("❌ Format perintah salah. Gunakan: /stop <job_id>")
-        return
+    """Handles the /stop_<job_id> command to cancel a mirror job."""
+    job_id = update.message.text.split('_')[1]
     
     await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
 
@@ -568,7 +564,7 @@ def setup_bot():
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("stop", stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
