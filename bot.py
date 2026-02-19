@@ -106,17 +106,17 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
-            f"⚙️ **Status:** Completed ✅\n"
+            f"📄 <b>File Name:</b> <code>{escape(full_file_name)}</code>\n"
+            f"⚙️ <b>Status:</b> Completed ✅\n"
         )
         if download_url:
-            text += f"🔗 **Link:** `{download_url}`"
+            text += f"🔗 <b>Link:</b> <code>{escape(download_url)}</code>"
         return {"text": text, "keyboard": []}
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
-            f"⚙️ **Status:** {status} ❌"
+            f"📄 <b>File Name:</b> <code>{escape(full_file_name)}</code>\n"
+            f"⚙️ <b>Status:</b> {status} ❌"
         )
         return {"text": text, "keyboard": []}
 
@@ -467,8 +467,8 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
 
     # Send initial message and keep track of it
     status_message = await update.message.reply_text(
-        f"⏳ Membatalkan proses untuk job `{job_id}`...",
-        parse_mode='Markdown'
+        f"⏳ Membatalkan proses untuk job <code>{job_id}</code>...",
+        parse_mode='HTML'
     )
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
