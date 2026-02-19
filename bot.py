@@ -3,8 +3,11 @@ import logging
 import re
 import httpx
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.requests import Request
@@ -16,22 +19,60 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Variabel Lingkungan & Konfigurasi
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-if not TELEGRAM_TOKEN:
-    raise ValueError("Tidak ada TELEGRAM_TOKEN ditemukan di environment variables")
+# Configuration using dataclass
+@dataclass
+class BotConfig:
+    telegram_token: str
+    webhook_host: str
+    gofile_api_url: Optional[str] = None
+    pixeldrain_api_url: Optional[str] = None
+    authorized_user_ids: List[int] = None
+    polling_interval: int = 1
+    cache_timeout: int = 300
 
-WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
-if not WEBHOOK_HOST:
-    raise ValueError("Tidak ada RENDER_EXTERNAL_URL ditemukan di environment variables")
+# Cache untuk file info
+file_info_cache: Dict[str, tuple] = {}
 
-GOFILE_API_URL = os.getenv('GOFILE_API_URL')
-PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
-AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
-POLLING_INTERVAL = 1  # Detik
+# Error handler decorator
+def handle_errors(func):
+    """Decorator untuk error handling yang konsisten."""
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except httpx.RequestError as e:
+            logger.error(f"Request error in {func.__name__}: {e}")
+            return {"success": False, "error": "Gagal terhubung ke layanan"}
+        except Exception as e:
+            logger.error(f"Unexpected error in {func.__name__}: {e}")
+            return {"success": False, "error": "Terjadi kesalahan tak terduga"}
+    return wrapper
+
+# Load configuration
+def load_config() -> BotConfig:
+    """Load configuration from environment variables."""
+    telegram_token = os.getenv('TELEGRAM_TOKEN')
+    if not telegram_token:
+        raise ValueError("Tidak ada TELEGRAM_TOKEN ditemukan di environment variables")
+    
+    webhook_host = os.getenv('RENDER_EXTERNAL_URL')
+    if not webhook_host:
+        raise ValueError("Tidak ada RENDER_EXTERNAL_URL ditemukan di environment variables")
+    
+    return BotConfig(
+        telegram_token=telegram_token,
+        webhook_host=webhook_host,
+        gofile_api_url=os.getenv('GOFILE_API_URL'),
+        pixeldrain_api_url=os.getenv('PIXELDRAIN_API_URL'),
+        authorized_user_ids=[int(uid) for uid in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if uid],
+        polling_interval=int(os.getenv('POLLING_INTERVAL', '1')),
+        cache_timeout=int(os.getenv('CACHE_TIMEOUT', '300'))
+    )
+
+# Global configuration
+config = load_config()
 
 # --- Inisialisasi Global ---
-application = Application.builder().token(TELEGRAM_TOKEN).build()
+application = Application.builder().token(config.telegram_token).build()
 async_client = httpx.AsyncClient(timeout=30)
 
 async def webhook(request: Request):
@@ -73,7 +114,6 @@ routes = [
 ]
 app = Starlette(routes=routes, lifespan=lifespan)
 
-
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
 
@@ -81,15 +121,13 @@ app = Starlette(routes=routes, lifespan=lifespan)
 
 def format_bytes(size: int) -> str:
     """Formats size in bytes to a human-readable string."""
-    if not size or size == 0:
+    if not size:
         return "0 B"
-    power = 1024
-    n = 0
-    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
-    while size >= power and n < len(power_labels) - 1:
-        size /= power
-        n += 1
-    return f"{size:.2f} {power_labels[n]}"
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} PB"
 
 def format_job_progress(job_info: dict, status_info: dict) -> dict:
     """Formats the progress display for a single job and returns text + keyboard."""
@@ -137,42 +175,58 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     
     return {"text": text, "keyboard": keyboard}
 
+@handle_errors
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
-    try:
-        async with async_client.stream("GET", url, follow_redirects=True, timeout=15) as r:
-            r.raise_for_status()
-            size = int(r.headers.get('content-length', 0))
-            filename = "N/A"
-            if 'content-disposition' in r.headers:
-                d = r.headers['content-disposition']
-                matches = re.findall('filename="?([^"]+)"?', d)
-                if matches:
-                    filename = matches[0]
-            if filename == "N/A":
-                parsed_url = urlparse(str(r.url))
-                filename = os.path.basename(parsed_url.path) or "downloaded_file"
-            return {"success": True, "filename": filename, "size": size, "formatted_size": format_bytes(size)}
-    except httpx.RequestError as e:
-        logger.error(f"Error getting file info for {url}: {e}")
-        return {"success": False, "error": "Gagal mengakses URL. Pastikan URL valid dan dapat diakses."}
-    except Exception as e:
-        logger.error(f"Unexpected error in get_file_info: {e}")
-        return {"success": False, "error": "Terjadi kesalahan tak terduga saat memeriksa URL."}
-
-# --- Global Poller ---
-
-async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """The global poller task to update all active jobs."""
-    bot = context.bot
+    current_time = time.time()
     
-    # Fetch status from both services
+    # Cek cache
+    if url in file_info_cache:
+        cached_data, timestamp = file_info_cache[url]
+        if current_time - timestamp < config.cache_timeout:
+            return cached_data
+    
+    async with async_client.stream("GET", url, follow_redirects=True, timeout=15) as r:
+        r.raise_for_status()
+        size = int(r.headers.get('content-length', 0))
+        filename = "N/A"
+        if 'content-disposition' in r.headers:
+            d = r.headers['content-disposition']
+            matches = re.findall('filename="?([^"]+)"?', d)
+            if matches:
+                filename = matches[0]
+        if filename == "N/A":
+            parsed_url = urlparse(str(r.url))
+            filename = os.path.basename(parsed_url.path) or "downloaded_file"
+        
+        result = {"success": True, "filename": filename, "size": size, "formatted_size": format_bytes(size)}
+        
+        # Simpan ke cache
+        file_info_cache[url] = (result, current_time)
+        return result
+
+# Generator untuk efisiensi memory
+def get_active_jobs_by_user(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """Get active jobs for a specific user using generator."""
+    if 'active_mirrors' not in context.bot_data:
+        return
+    
+    for job_id, job_info in context.bot_data['active_mirrors'].items():
+        if job_info['chat_id'] == chat_id:
+            yield job_id, job_info
+
+async def fetch_service_statuses() -> dict:
+    """Fetch status from all services."""
     all_statuses = {}
-    service_urls = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    service_urls = {
+        'gofile': config.gofile_api_url, 
+        'pixeldrain': config.pixeldrain_api_url
+    }
     
     tasks = []
     for service, base_url in service_urls.items():
-        if not base_url: continue
+        if not base_url: 
+            continue
         tasks.append(async_client.get(f"{base_url}/status/all", timeout=10))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -191,30 +245,36 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 logger.error(f"Error parsing JSON from {service}: {e}")
         else:
             logger.warning(f"Status fetch from {service} returned status {result.status_code}")
+    
+    return all_statuses
 
-    # Group active jobs by user (chat_id) and prepare for updates
-    jobs_by_user = {}
+async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The global poller task to update all active jobs."""
+    bot = context.bot
+    all_statuses = await fetch_service_statuses()
+    
+    # Initialize bot_data structures
     if 'active_mirrors' not in context.bot_data:
         context.bot_data['active_mirrors'] = {}
+    if 'dashboard_state' not in context.bot_data:
+        context.bot_data['dashboard_state'] = {}
 
     finished_jobs_to_remove = []
+    jobs_by_user = {}
 
+    # Process jobs
     for job_id, job_info in list(context.bot_data['active_mirrors'].items()):
         chat_id = job_info['chat_id']
         if chat_id not in jobs_by_user:
             jobs_by_user[chat_id] = {'jobs': [], 'message_id': job_info['message_id']}
         
-        status_info = all_statuses.get(job_id)
+        status_info = all_statuses.get(job_id, {'status': 'completed'})
         
-        # If job is no longer reported by the server, assume it's done.
-        if not status_info:
-            status_info = {'status': 'completed'}
-        
-        # Handle finished jobs: send a separate message and mark for removal
+        # Handle finished jobs
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
             finished_jobs_to_remove.append(job_id)
             
-            # Format a final message for the completed job
+            # Send final message for completed job
             final_message_data = format_job_progress(job_info, status_info)
             try:
                 await bot.send_message(
@@ -226,24 +286,23 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             except Exception as e:
                 logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
         else:
-            # If the job is still active, add it to the dashboard update list
+            # Add active job to dashboard update list
             jobs_by_user[chat_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
 
-    # Update the main dashboard message for each user
+    # Update dashboard for each user
     for chat_id, user_data in jobs_by_user.items():
         active_jobs = user_data['jobs']
         message_id = user_data['message_id']
-        
-        full_text = ""
-        all_keyboards = []
         
         if not active_jobs:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
             full_text = "📊 Dasbor Progres Aktif:\n\n"
-            for i, j in enumerate(active_jobs):
-                progress_data = format_job_progress(j['job_info'], j['status_info'])
+            all_keyboards = []
+            
+            for i, job_data in enumerate(active_jobs):
+                progress_data = format_job_progress(job_data['job_info'], job_data['status_info'])
                 full_text += progress_data['text']
                 all_keyboards.extend(progress_data['keyboard'])
 
@@ -252,12 +311,8 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             
             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
-        # Get the last known state for this dashboard to avoid API spam
-        if 'dashboard_state' not in context.bot_data:
-            context.bot_data['dashboard_state'] = {}
+        # Only edit if content has changed
         last_text = context.bot_data['dashboard_state'].get(chat_id)
-
-        # Only edit if the content has changed
         if last_text != full_text:
             try:
                 await bot.edit_message_text(
@@ -268,32 +323,25 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     parse_mode='Markdown',
                     disable_web_page_preview=True
                 )
-                # Update the state after successful edit
                 context.bot_data['dashboard_state'][chat_id] = full_text
             except Exception as e:
                 logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
 
-    # Clean up finished jobs from the active list
+    # Clean up finished jobs
     for job_id in finished_jobs_to_remove:
-        if job_id in context.bot_data['active_mirrors']:
-            del context.bot_data['active_mirrors'][job_id]
+        context.bot_data['active_mirrors'].pop(job_id, None)
 
-    # Also clean up dashboard state for users with no active jobs
-    if 'dashboard_state' in context.bot_data:
-        active_chat_ids = {job['chat_id'] for job in context.bot_data['active_mirrors'].values()}
-        stale_chat_ids = [chat_id for chat_id in context.bot_data['dashboard_state'] if chat_id not in active_chat_ids]
-        for chat_id in stale_chat_ids:
-            del context.bot_data['dashboard_state'][chat_id]
-
+    # Clean up dashboard state for users with no active jobs
+    active_chat_ids = {job['chat_id'] for job in context.bot_data['active_mirrors'].values()}
+    stale_chat_ids = [chat_id for chat_id in context.bot_data['dashboard_state'] if chat_id not in active_chat_ids]
+    for chat_id in stale_chat_ids:
+        del context.bot_data['dashboard_state'][chat_id]
 
 # --- Fungsi Utama Bot ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler untuk perintah /start"""
     user = update.effective_user
-    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-    #     return
     await update.message.reply_html(
         rf"👋 Halo {user.mention_html()}! Kirimkan saya sebuah URL untuk memulai.",
         reply_markup=None,
@@ -301,31 +349,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai alur mirror saat mendeteksi URL."""
-    user = update.effective_user
-    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-    #     return ConversationHandler.END
-
     message = update.message
-    # Cari entitas URL dalam pesan
-    url_entities = message.parse_entities(types=[MessageEntity.URL])
-    if not url_entities:
-        # Jika tidak ada entitas URL, coba cari tautan teks biasa
-        text_link_entities = message.parse_entities(types=[MessageEntity.TEXT_LINK])
-        if not text_link_entities:
-            await message.reply_text("❌ URL tidak ditemukan dalam pesan.")
-            return ConversationHandler.END
-        # Ambil URL dari entitas text_link pertama
-        url = list(text_link_entities.keys())[0].url
-    else:
-        # Ambil URL dari entitas URL pertama
-        url = list(url_entities.values())[0]
-
-    context.user_data['url'] = url
+    
+    # Gunakan regex untuk mengekstrak URL lebih efisien
+    url_pattern = r'https?://(?:[-\w.])+(?:[:0-9]+)?(?:/(?:[\w/_.])*(?:\?[\w&=%.]*)?)?'
+    urls = re.findall(url_pattern, message.text or '')
+    
+    if not urls:
+        await message.reply_text("❌ URL tidak ditemukan dalam pesan.")
+        return ConversationHandler.END
+    
+    context.user_data['url'] = urls[0]
     
     processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
     
-    info = await get_file_info_from_url(url)
+    info = await get_file_info_from_url(urls[0])
     
     if not info.get('success'):
         await processing_message.edit_text(f"❌ {info.get('error', 'Gagal mendapatkan info file.')}")
@@ -378,7 +416,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     await query.answer()
     
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    service_map = {'gofile': config.gofile_api_url, 'pixeldrain': config.pixeldrain_api_url}
     api_url = service_map.get(service)
 
     if not api_url:
@@ -394,9 +432,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             job_id = result['job_id']
             
             # Create or get the progress message
-            # If user has other active jobs, use the existing message.
             chat_id = query.message.chat_id
-            progress_message = None
             
             if 'active_mirrors' not in context.bot_data:
                 context.bot_data['active_mirrors'] = {}
@@ -441,7 +477,7 @@ async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     job_info = context.bot_data['active_mirrors'][job_id]
     service = job_info['service']
     
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    service_map = {'gofile': config.gofile_api_url, 'pixeldrain': config.pixeldrain_api_url}
     api_url = service_map.get(service)
 
     if not api_url:
@@ -455,8 +491,7 @@ async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         if result.get('success'):
             # Hapus job dari daftar aktif
-            if job_id in context.bot_data['active_mirrors']:
-                del context.bot_data['active_mirrors'][job_id]
+            context.bot_data['active_mirrors'].pop(job_id, None)
             await query.answer(text="✅ Permintaan pembatalan berhasil dikirim!")
             # Panggil update_progress secara manual untuk segera memperbarui dasbor
             await update_progress(context)
@@ -479,14 +514,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-
-
 def setup_bot():
     """Mengatur semua handler dan job queue untuk bot."""
     # Initialize bot_data dan JobQueue
     application.bot_data['active_mirrors'] = {}
     job_queue = application.job_queue
-    job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=1)
+    job_queue.run_repeating(update_progress, interval=config.polling_interval, first=1)
 
     # Daftarkan semua handler
     conv_handler = ConversationHandler(
@@ -508,15 +541,10 @@ def setup_bot():
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
-    """Menginisialisasi aplikasi dan mengatur webhook."""
+    """Setup webhook untuk bot."""
     try:
-        # Pastikan host tidak memiliki skema http/https untuk menghindari duplikasi
-        clean_host = WEBHOOK_HOST.replace("https://", "").replace("http://", "")
-        url = f"https://{clean_host}/webhook"
-        
-        if await application.bot.set_webhook(url):
-            logger.info(f"Webhook has been set to `{url}`")
-        else:
-            logger.error(f"Failed to set webhook to `{url}`")
+        webhook_url = f"{config.webhook_host}/webhook"
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
     except Exception as e:
         logger.error(f"Error during webhook setup: {e}")
