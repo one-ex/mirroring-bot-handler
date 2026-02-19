@@ -465,10 +465,14 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("❌ Format Job ID untuk pembatalan tidak valid.")
         return
 
-    await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
+    # Send initial message and keep track of it
+    status_message = await update.message.reply_text(
+        f"⏳ Membatalkan proses untuk job `{job_id}`...",
+        parse_mode='Markdown'
+    )
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
-        await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
+        await status_message.edit_text("❌ Job tidak lagi aktif atau sudah selesai.")
         return
 
     job_info = context.bot_data['active_mirrors'][job_id]
@@ -478,7 +482,7 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     api_url = service_map.get(service)
 
     if not api_url:
-        await update.message.reply_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
+        await status_message.edit_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
         return
 
     try:
@@ -487,13 +491,20 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         result = response.json()
 
         if result.get('success'):
-            # The poller will handle the removal and final message
-            await update.message.reply_text(f"✅ Permintaan pembatalan untuk job `{job_id}` berhasil dikirim.", parse_mode='Markdown')
+            # The poller will eventually send a final "Cancelled" status.
+            # This provides immediate feedback.
+            await status_message.edit_text(
+                f"✅ Permintaan pembatalan untuk job `{job_id}` berhasil dikirim. Status akan segera diperbarui.",
+                parse_mode='Markdown'
+            )
         else:
-            await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
+            await status_message.edit_text(
+                f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}"
+            )
 
     except httpx.RequestError as e:
         logger.error(f"Error stopping job {job_id}: {e}")
+        await status_message.edit_text("❌ Gagal terhubung ke layanan mirror saat mencoba membatalkan.")
         await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
