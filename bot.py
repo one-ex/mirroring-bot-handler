@@ -95,16 +95,35 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     """Formats the progress display for a single job and returns text + keyboard."""
     
     job_id = status_info.get('job_id', 'N/A')
-    file_name = job_info['file_info']['filename']
-    if len(file_name) > 20:
-        file_name = file_name[:17] + "..."
-
+    full_file_name = job_info['file_info']['filename']
     size = job_info['file_info']['formatted_size']
     status = status_info.get('status', 'N/A').capitalize()
     progress = status_info.get('progress', 0)
     speed = status_info.get('speed_mbps', 0)
     eta = status_info.get('estimasi', 0)
     download_url = status_info.get('download_url')
+
+    # Handle finished jobs with the new simple format
+    if status in ['Completed', 'Sukses']:
+        text = (
+            f"📄 **File Name:** {full_file_name}\n"
+            f"⚙️ **Status:** Completed ✅\n"
+        )
+        if download_url:
+            text += f"🔗 **Link:** `{download_url}`"
+        return {"text": text, "keyboard": []}
+
+    if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
+        text = (
+            f"📄 **File Name:** {full_file_name}\n"
+            f"⚙️ **Status:** {status} ❌"
+        )
+        return {"text": text, "keyboard": []}
+
+    # Handle active jobs with the detailed dashboard format
+    file_name_truncated = full_file_name
+    if len(file_name_truncated) > 20:
+        file_name_truncated = file_name_truncated[:17] + "..."
 
     # Progress Bar
     bar_length = 25
@@ -113,25 +132,17 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     text = (
         f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name}`\n"
+        f"📄 **File Name:** `{file_name_truncated}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
+        f"〚{bar}〛`{progress:.1f}%`\n"
+        f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
+        f"⏳ **Estimation:** `{eta} Sec`\n"
+        f"🚫 **Cancel Job:** /stop_{job_id}"
     )
 
+    # No more keyboard for active jobs
     keyboard = []
-    if status in ['Completed', 'Sukses']:
-        text += f"✅ **Selesai!**\n"
-        if download_url:
-            text += f"🔗 **Link:** {download_url}"
-    elif status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
-        text += f"❌ **Gagal!**"
-    else:
-        text += (
-            f"〚{bar}〛`{progress:.1f}%`\n"
-            f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-            f"⏳ **Estimation:** `{eta} Sec`\n"
-            f"🚫 /stop_{job_id}"
-        )
     
     return {"text": text, "keyboard": keyboard}
 
@@ -426,18 +437,12 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop_JOBID command."""
-    message = update.message
-    try:
-        job_id = message.text.split('_')[1]
-    except IndexError:
-        await message.reply_text("Format perintah salah. Gunakan /stop_JOB_ID", quote=True)
-        return
-
-    await message.reply_text("⏳ Mengirim permintaan pembatalan...", quote=True)
+    """Handles the /stop_<job_id> command to cancel a mirror job."""
+    message_text = update.message.text
+    job_id = message_text.split('_')[1]
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Job tidak lagi aktif atau sudah selesai.")
+        await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
         return
 
     job_info = context.bot_data['active_mirrors'][job_id]
@@ -447,7 +452,7 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     api_url = service_map.get(service)
 
     if not api_url:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
+        await update.message.reply_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
         return
 
     try:
@@ -456,14 +461,14 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         result = response.json()
 
         if result.get('success'):
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ Permintaan pembatalan untuk job `{job_id}` berhasil dikirim!", parse_mode='Markdown')
-            await update_progress(context)
+            await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
+            # The poller will handle the removal and update the dashboard
         else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
+            await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
     except httpx.RequestError as e:
         logger.error(f"Error stopping job {job_id}: {e}")
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
+        await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
@@ -501,7 +506,6 @@ def setup_bot():
         fallbacks=[CommandHandler('cancel', cancel)],
     )
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop_mirror_command_handler, filters=filters.Regex(r'^/stop_')))
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
