@@ -452,8 +452,23 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop_<job_id> command to cancel a mirror job."""
-    job_id = update.message.text.split('_')[1]
+    """Handles the /stop<job_id> command to cancel a mirror job."""
+    command_text = update.message.text
+    if not command_text.startswith('/stop') or len(command_text) <= 5:
+        # This case should ideally not be hit if the regex is correct, but it's good practice
+        await update.message.reply_text(
+            "⚠️ Perintah tidak valid. Gunakan format: /stop<job_id>\n"
+            "Contoh: /stop12345"
+        )
+        return
+    
+    job_id = command_text[5:] # Extract everything after "/stop"
+    
+    if not job_id.isalnum(): # Basic validation
+        await update.message.reply_text(
+            "⚠️ Job ID tidak valid. Seharusnya hanya berisi angka dan huruf."
+        )
+        return
     
     await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
 
