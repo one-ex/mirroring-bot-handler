@@ -138,7 +138,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel Job:** /stop{job_id}"
+        f"🚫 /stop{job_id}"
     )
 
     # No more keyboard for active jobs
@@ -215,15 +215,23 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         
         status_info = all_statuses.get(job_id)
         
-        # If job is no longer reported by the server, assume it's done.
+        # Jika pekerjaan tidak lagi dilaporkan oleh server, asumsikan selesai.
         if not status_info:
             status_info = {'status': 'completed'}
         
-        # Handle finished jobs: send a separate message and mark for removal
+        # Periksa apakah pekerjaan dibatalkan secara manual
+        is_cancelled = job_info.get('manually_cancelled', False)
+        current_status = status_info.get('status')
+
+        # Jika dibatalkan secara manual dan statusnya 'failed', ganti menjadi 'cancelled'
+        if is_cancelled and current_status == 'failed':
+            status_info['status'] = 'cancelled'
+        
+        # Tangani pekerjaan yang selesai: kirim pesan terpisah dan tandai untuk dihapus
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
             finished_jobs_to_remove.append(job_id)
             
-            # Format a final message for the completed job
+            # Format pesan akhir untuk pekerjaan yang selesai
             final_message_data = format_job_progress(job_info, status_info)
             try:
                 await bot.send_message(
@@ -470,6 +478,9 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
 
         if result.get('success'):
             await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
+            # Tandai pekerjaan ini sebagai dibatalkan secara manual
+            if full_job_id in context.bot_data['active_mirrors']:
+                context.bot_data['active_mirrors'][full_job_id]['manually_cancelled'] = True
         else:
             await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
