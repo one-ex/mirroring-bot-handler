@@ -491,7 +491,7 @@ async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer(text="⏳ Mengirim permintaan pembatalan...")
 
-    job_id = query.data.split('_')[1]
+    job_id = query.data
 
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
