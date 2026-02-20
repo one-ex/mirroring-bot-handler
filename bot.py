@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, JSONResponse
+from starlette.responses import PlainTextResponse
 from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
@@ -79,6 +79,12 @@ app = Starlette(routes=routes, lifespan=lifespan)
 
 # --- Fungsi Pembantu ---
 
+def escape_html(text: str) -> str:
+    """Escape special characters for HTML parsing."""
+    if not text:
+        return ""
+    return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
 def format_bytes(size: int) -> str:
     """Formats size in bytes to a human-readable string."""
     if not size or size == 0:
@@ -91,13 +97,13 @@ def format_bytes(size: int) -> str:
         n += 1
     return f"{size:.2f} {power_labels[n]}"
 
-def format_job_progress(job_info: dict, status_info: dict) -> dict:
-    """Formats the progress display for a single job and returns text + keyboard."""
+def format_job_progress(job_info: dict, status_info: dict) -> str:
+    """Formats the progress display for a single job and returns text with HTML formatting."""
     
-    job_id = status_info.get('job_id', 'N/A')
-    full_file_name = job_info['file_info']['filename']
-    size = job_info['file_info']['formatted_size']
-    status = status_info.get('status', 'N/A').capitalize()
+    job_id = escape_html(status_info.get('job_id', 'N/A'))
+    full_file_name = escape_html(job_info['file_info']['filename'])
+    size = escape_html(job_info['file_info']['formatted_size'])
+    status = escape_html(status_info.get('status', 'N/A').capitalize())
     progress = status_info.get('progress', 0)
     speed = status_info.get('speed_mbps', 0)
     eta = status_info.get('estimasi', 0)
@@ -106,19 +112,20 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
-            f"⚙️ **Status:** Completed ✅\n"
+            f"📄 <b>File Name:</b> {full_file_name}\n"
+            f"⚙️ <b>Status:</b> Completed ✅\n"
         )
         if download_url:
-            text += f"🔗 **Link:** `{download_url}`"
-        return {"text": text, "keyboard": []}
+            download_url = escape_html(download_url)
+            text += f"🔗 <b>Link:</b> <code>{download_url}</code>"
+        return text
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
-            f"⚙️ **Status:** {status} ❌"
+            f"📄 <b>File Name:</b> {full_file_name}\n"
+            f"⚙️ <b>Status:</b> {status} ❌"
         )
-        return {"text": text, "keyboard": []}
+        return text
 
     # Handle active jobs with the detailed dashboard format
     file_name_truncated = full_file_name
@@ -131,18 +138,17 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name_truncated}`\n"
-        f"💾 **Size:** `{size}`\n"
-        f"⚙️ **Status:** `{status}`\n"
-        f"〚{bar}〛`{progress:.1f}%`\n"
-        f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-        f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel:** /stop{job_id}"
+        f"🆔 <b>Jobs ID:</b> <code>{job_id}</code>\n"
+        f"📄 <b>File Name:</b> <code>{file_name_truncated}</code>\n"
+        f"💾 <b>Size:</b> <code>{size}</code>\n"
+        f"⚙️ <b>Status:</b> <code>{status}</code>\n"
+        f"〚{bar}〛<code>{progress:.1f}%</code>\n"
+        f"🚀 <b>Speed:</b> <code>{speed:.2f} MB/s</code>\n"
+        f"⏳ <b>Estimation:</b> <code>{eta} Sec</code>\n"
+        f"🚫 <b>Cancel:</b> <code>/stop_{job_id}</code>"
     )
 
-    # Keyboard is no longer used for active jobs
-    return {"text": text, "keyboard": []}
+    return text
 
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
@@ -222,12 +228,12 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             finished_jobs_to_remove.append(job_id)
             
             # Format a final message for the completed job
-            final_message_data = format_job_progress(job_info, status_info)
+            final_message = format_job_progress(job_info, status_info)
             try:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=final_message_data['text'],
-                    parse_mode='Markdown',
+                    text=final_message,
+                    parse_mode='HTML',
                     disable_web_page_preview=True
                 )
             except Exception as e:
@@ -242,20 +248,23 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         message_id = user_data['message_id']
         
         full_text = ""
-        all_keyboards = []
         
         if not active_jobs:
             full_text = "🏁 Semua pekerjaan selesai."
-            reply_markup = None
         else:
-            # Use a list to build the text parts and join at the end
-            text_parts = ["📊 Dasbor Progres Aktif:\n"]
-            for j in active_jobs:
-                progress_data = format_job_progress(j['job_info'], j['status_info'])
-                text_parts.append(progress_data['text'])
-            
-            full_text = "\n\n= = = = = = = = = = = = = = = = = = = = = = =\n\n".join(text_parts)
-            reply_markup = None
+            full_text = "📊 Mirroring Process:\n\n"
+            for i, j in enumerate(active_jobs):
+                job_text = format_job_progress(j['job_info'], j['status_info'])
+                
+                # Check if adding this job would exceed message length limit
+                if len(full_text) + len(job_text) > 4000:  # Telegram limit is 4096
+                    full_text += "\n\n... dan job lainnya ..."
+                    break
+                    
+                full_text += job_text
+
+                if i < len(active_jobs) - 1:
+                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
 
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
@@ -269,8 +278,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     chat_id=chat_id,
                     message_id=message_id,
                     text=full_text,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown',
+                    parse_mode='HTML',
                     disable_web_page_preview=True
                 )
                 # Update the state after successful edit
@@ -299,10 +307,63 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
     #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
     #     return
+    
+    user_mention = f"@{user.username}" if user.username else f"<a href='tg://user?id={user.id}'>{escape_html(user.first_name)}</a>"
+    
     await update.message.reply_html(
-        rf"👋 Halo {user.mention_html()}! Kirimkan saya sebuah URL untuk memulai.",
+        f"👋 Halo {user_mention}! Kirimkan saya sebuah URL untuk memulai.",
         reply_markup=None,
     )
+
+async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles the /stop_<job_id> command to cancel a mirror job."""
+    user = update.effective_user
+    command_text = update.message.text
+    
+    # Extract job_id dari command
+    try:
+        job_id = command_text.split('_', 1)[1]
+    except IndexError:
+        await update.message.reply_html("❌ Format perintah salah. Gunakan: /stop_jobid")
+        return
+    
+    await update.message.reply_html(f"⏳ Mengirim permintaan pembatalan untuk job <code>{escape_html(job_id)}</code>...")
+
+    # Verifikasi job exists
+    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
+        await update.message.reply_html("❌ Job tidak lagi aktif atau sudah selesai.")
+        return
+
+    job_info = context.bot_data['active_mirrors'][job_id]
+    
+    # Verifikasi hanya pemilik job yang bisa membatalkan
+    if job_info['chat_id'] != user.id:
+        await update.message.reply_html("🚫 Anda tidak memiliki izin untuk membatalkan job ini.")
+        return
+
+    service = job_info['service']
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    api_url = service_map.get(service)
+
+    if not api_url:
+        await update.message.reply_html("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
+        return
+
+    try:
+        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            # The poller will handle the removal and final message
+            await update.message.reply_html(f"✅ Permintaan pembatalan untuk job <code>{escape_html(job_id)}</code> berhasil dikirim.")
+        else:
+            error_msg = escape_html(result.get('error', 'Kesalahan tidak diketahui'))
+            await update.message.reply_html(f"⚠️ Gagal membatalkan: {error_msg}")
+
+    except httpx.RequestError as e:
+        logger.error(f"Error stopping job {job_id}: {e}")
+        await update.message.reply_html("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai alur mirror saat mendeteksi URL."""
@@ -318,7 +379,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         # Jika tidak ada entitas URL, coba cari tautan teks biasa
         text_link_entities = message.parse_entities(types=[MessageEntity.TEXT_LINK])
         if not text_link_entities:
-            await message.reply_text("❌ URL tidak ditemukan dalam pesan.")
+            await message.reply_html("❌ URL tidak ditemukan dalam pesan.")
             return ConversationHandler.END
         # Ambil URL dari entitas text_link pertama
         url = list(text_link_entities.keys())[0].url
@@ -328,16 +389,17 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     context.user_data['url'] = url
     
-    processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
+    processing_message = await message.reply_html("🔎 Menganalisis URL, mohon tunggu...")
     
     info = await get_file_info_from_url(url)
     
     if not info.get('success'):
-        await processing_message.edit_text(f"❌ {info.get('error', 'Gagal mendapatkan info file.')}")
+        error_msg = escape_html(info.get('error', 'Gagal mendapatkan info file.'))
+        await processing_message.edit_text(f"❌ {error_msg}", parse_mode='HTML')
         return ConversationHandler.END
 
     if not info.get('size'):
-        await processing_message.edit_text("❌ Gagal mendapatkan ukuran file atau ukuran file adalah 0. Proses dibatalkan.")
+        await processing_message.edit_text("❌ Gagal mendapatkan ukuran file atau ukuran file adalah 0. Proses dibatalkan.", parse_mode='HTML')
         return ConversationHandler.END
 
     context.user_data['file_info'] = info
@@ -348,13 +410,16 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    filename_escaped = escape_html(info['filename'])
+    size_escaped = escape_html(info['formatted_size'])
+    
     await processing_message.edit_text(
-        f"📜 **Info File:**\n"
-        f"**Nama:** `{info['filename']}`\n"
-        f"**Ukuran:** `{info['formatted_size']}`\n\n"
+        f"📜 <b>Info File:</b>\n"
+        f"<b>Nama:</b> <code>{filename_escaped}</code>\n"
+        f"<b>Ukuran:</b> <code>{size_escaped}</code>\n\n"
         f"Lanjutkan proses mirroring?",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
     
     return SELECTING_ACTION
@@ -371,7 +436,9 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        text="Pilih layanan tujuan:", reply_markup=reply_markup
+        text="Pilih layanan tujuan:", 
+        reply_markup=reply_markup,
+        parse_mode='HTML'
     )
     return SELECTING_SERVICE
 
@@ -387,7 +454,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     api_url = service_map.get(service)
 
     if not api_url:
-        await query.edit_message_text("❌ Layanan tidak valid.")
+        await query.edit_message_text("❌ Layanan tidak valid.", parse_mode='HTML')
         return ConversationHandler.END
 
     try:
@@ -418,7 +485,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 await query.message.delete()
                 
                 # 3. Send a new message to become the new dashboard
-                new_dashboard_message = await context.bot.send_message(chat_id=chat_id, text="📊 Dasbor Progres Aktif:")
+                new_dashboard_message = await context.bot.send_message(
+                    chat_id=chat_id, 
+                    text="📊 Mirroring Process:",
+                    parse_mode='HTML'
+                )
                 new_message_id = new_dashboard_message.message_id
 
                 # 4. Update all existing jobs for this user to point to the new dashboard
@@ -428,7 +499,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 message_id_for_new_job = new_message_id
             else:
                 # This is the first job, edit the selection message to become the dashboard
-                await query.edit_message_text("📊 Dasbor Progres Aktif:")
+                await query.edit_message_text(
+                    "📊 Mirroring Process:",
+                    parse_mode='HTML'
+                )
                 message_id_for_new_job = query.message.message_id
 
             # Store the new job's info
@@ -443,118 +517,26 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await update_progress(context)
             
         else:
-            await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
+            error_msg = escape_html(result.get('error', 'Kesalahan tidak diketahui'))
+            await query.edit_message_text(f"❌ Gagal memulai mirror: {error_msg}", parse_mode='HTML')
 
     except httpx.RequestError as e:
-        await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
+        await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}", parse_mode='HTML')
 
     context.user_data.clear()
     return ConversationHandler.END
-
-async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop<job_id> command to cancel a mirror job."""
-    command_text = update.message.text
-    if not command_text.startswith('/stop') or len(command_text) <= 5:
-        # This case should ideally not be hit if the regex is correct, but it's good practice
-        await update.message.reply_text(
-            "⚠️ Perintah tidak valid. Gunakan format: /stop<job_id>\n"
-            "Contoh: /stop12345"
-        )
-        return
-    
-    job_id = command_text[5:] # Extract everything after "/stop"
-    
-    if not job_id.isalnum(): # Basic validation
-        await update.message.reply_text(
-            "⚠️ Job ID tidak valid. Seharusnya hanya berisi angka dan huruf."
-        )
-        return
-    
-    await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
-
-    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
-        await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
-        return
-
-    job_info = context.bot_data['active_mirrors'][job_id]
-    service = job_info['service']
-    
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
-    api_url = service_map.get(service)
-
-    if not api_url:
-        await update.message.reply_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
-        return
-
-    try:
-        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
-        response.raise_for_status()
-        result = response.json()
-
-        if result.get('success'):
-            # The poller will handle the removal and final message
-            await update.message.reply_text(f"✅ Permintaan pembatalan untuk job `{job_id}` berhasil dikirim.", parse_mode='Markdown')
-        else:
-            await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
-
-    except httpx.RequestError as e:
-        logger.error(f"Error stopping job {job_id}: {e}")
-        await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
-
-async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """DEPRECATED: Handles the 'stop' button press to cancel a mirror job."""
-    query = update.callback_query
-    await query.answer(text="⏳ Mengirim permintaan pembatalan...")
-
-    job_id = query.data.split('_')[1]
-
-
-    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
-        await query.edit_message_text("❌ Job tidak lagi aktif atau sudah selesai.", reply_markup=None)
-        return
-
-    job_info = context.bot_data['active_mirrors'][job_id]
-    service = job_info['service']
-    
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
-    api_url = service_map.get(service)
-
-    if not api_url:
-        await query.edit_message_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.", reply_markup=None)
-        return
-
-    try:
-        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
-        response.raise_for_status()
-        result = response.json()
-
-        if result.get('success'):
-            # Hapus job dari daftar aktif
-            if job_id in context.bot_data['active_mirrors']:
-                del context.bot_data['active_mirrors'][job_id]
-            await query.answer(text="✅ Permintaan pembatalan berhasil dikirim!")
-            # Panggil update_progress secara manual untuk segera memperbarui dasbor
-            await update_progress(context)
-        else:
-            await query.answer(text=f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
-
-    except httpx.RequestError as e:
-        logger.error(f"Error stopping job {job_id}: {e}")
-        await query.answer(text="❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text(text="🚫 Permintaan dibatalkan.")
+        await query.edit_message_text(text="🚫 Permintaan dibatalkan.", parse_mode='HTML')
     else:
-        await update.message.reply_text("🚫 Proses dibatalkan.")
+        await update.message.reply_html("🚫 Proses dibatalkan.")
         
     context.user_data.clear()
     return ConversationHandler.END
-
-
 
 def setup_bot():
     """Mengatur semua handler dan job queue untuk bot."""
@@ -577,9 +559,11 @@ def setup_bot():
         },
         fallbacks=[CommandHandler('cancel', cancel)],
     )
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop'), stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
+    
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
