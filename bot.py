@@ -138,13 +138,11 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel Job:** `/stop{job_id}`"
+        f"🚫 **Cancel:** /stop{job_id}"
     )
 
-    # No more keyboard for active jobs
-    keyboard = []
-    
-    return {"text": text, "keyboard": keyboard}
+    # Keyboard is no longer used for active jobs
+    return {"text": text, "keyboard": []}
 
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
@@ -250,16 +248,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            full_text = "📊 Dasbor Progres Aktif:\n\n"
-            for i, j in enumerate(active_jobs):
+            # Use a list to build the text parts and join at the end
+            text_parts = ["📊 Dasbor Progres Aktif:\n"]
+            for j in active_jobs:
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
-                full_text += progress_data['text']
-                all_keyboards.extend(progress_data['keyboard'])
-
-                if i < len(active_jobs) - 1:
-                    full_text += "\n\n= = = = = = = = = = = = = = = = = = = =\n\n"
+                text_parts.append(progress_data['text'])
             
-            reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+            full_text = "\n\n= = = = = = = = = = = = = = = = = = = = = = =\n\n".join(text_parts)
+            reply_markup = None
 
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
@@ -401,31 +397,50 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
         if result.get('success') and result.get('job_id'):
             job_id = result['job_id']
-            
-            # Create or get the progress message
-            # If user has other active jobs, use the existing message.
             chat_id = query.message.chat_id
-            progress_message = None
             
             if 'active_mirrors' not in context.bot_data:
                 context.bot_data['active_mirrors'] = {}
 
-            existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
-            if existing_jobs:
-                message_id = existing_jobs[0]['message_id']
-                await query.message.delete() # delete the selection message
-            else:
-                # This is the first job for this user, edit the current message to be the dashboard
-                await query.edit_message_text("📊 Dasbor Progres Aktif:")
-                message_id = query.message.message_id
+            # Check for existing jobs for this user
+            existing_jobs = {jid: jinfo for jid, jinfo in context.bot_data['active_mirrors'].items() if jinfo['chat_id'] == chat_id}
 
-            # Store job info
+            if existing_jobs:
+                # Dashboard exists, we need to move it
+                # 1. Delete the old dashboard
+                old_message_id = list(existing_jobs.values())[0]['message_id']
+                try:
+                    await context.bot.delete_message(chat_id=chat_id, message_id=old_message_id)
+                except Exception as e:
+                    logger.warning(f"Could not delete old dashboard message {old_message_id} for chat {chat_id}: {e}")
+                
+                # 2. Delete the current service selection message
+                await query.message.delete()
+                
+                # 3. Send a new message to become the new dashboard
+                new_dashboard_message = await context.bot.send_message(chat_id=chat_id, text="📊 Dasbor Progres Aktif:")
+                new_message_id = new_dashboard_message.message_id
+
+                # 4. Update all existing jobs for this user to point to the new dashboard
+                for j_id in existing_jobs:
+                    context.bot_data['active_mirrors'][j_id]['message_id'] = new_message_id
+                
+                message_id_for_new_job = new_message_id
+            else:
+                # This is the first job, edit the selection message to become the dashboard
+                await query.edit_message_text("📊 Dasbor Progres Aktif:")
+                message_id_for_new_job = query.message.message_id
+
+            # Store the new job's info
             context.bot_data['active_mirrors'][job_id] = {
                 'chat_id': chat_id,
-                'message_id': message_id,
+                'message_id': message_id_for_new_job,
                 'file_info': context.user_data['file_info'],
                 'service': service
             }
+
+            # Immediately trigger an update to populate the dashboard
+            await update_progress(context)
             
         else:
             await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
@@ -437,10 +452,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop<job_id> command to cancel a mirror job."""
-    message_text = update.message.text
-    # Extract job_id by removing the /stop prefix
-    job_id = message_text[5:]
+    """Handles the /stop_<job_id> command to cancel a mirror job."""
+    job_id = update.message.text.split('_')[1]
+    
+    await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
         await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
@@ -462,14 +477,55 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         result = response.json()
 
         if result.get('success'):
-            await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
-            # The poller will handle the removal and update the dashboard
+            # The poller will handle the removal and final message
+            await update.message.reply_text(f"✅ Permintaan pembatalan untuk job `{job_id}` berhasil dikirim.", parse_mode='Markdown')
         else:
             await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
     except httpx.RequestError as e:
         logger.error(f"Error stopping job {job_id}: {e}")
         await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
+
+async def stop_mirror_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """DEPRECATED: Handles the 'stop' button press to cancel a mirror job."""
+    query = update.callback_query
+    await query.answer(text="⏳ Mengirim permintaan pembatalan...")
+
+    job_id = query.data.split('_')[1]
+
+
+    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
+        await query.edit_message_text("❌ Job tidak lagi aktif atau sudah selesai.", reply_markup=None)
+        return
+
+    job_info = context.bot_data['active_mirrors'][job_id]
+    service = job_info['service']
+    
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    api_url = service_map.get(service)
+
+    if not api_url:
+        await query.edit_message_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.", reply_markup=None)
+        return
+
+    try:
+        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            # Hapus job dari daftar aktif
+            if job_id in context.bot_data['active_mirrors']:
+                del context.bot_data['active_mirrors'][job_id]
+            await query.answer(text="✅ Permintaan pembatalan berhasil dikirim!")
+            # Panggil update_progress secara manual untuk segera memperbarui dasbor
+            await update_progress(context)
+        else:
+            await query.answer(text=f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+    except httpx.RequestError as e:
+        logger.error(f"Error stopping job {job_id}: {e}")
+        await query.answer(text="❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
