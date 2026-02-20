@@ -437,16 +437,22 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop<job_id> command to cancel a mirror job."""
+    """Handles the /stop<job_id> command to cancel a mirror job, matching by prefix."""
     message_text = update.message.text
-    # Extract job_id by removing the /stop prefix
-    job_id = message_text[5:]
+    partial_job_id = message_text[5:] # e.g., "7539d22c"
 
-    if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
+    full_job_id = None
+    if 'active_mirrors' in context.bot_data:
+        for active_id in context.bot_data['active_mirrors']:
+            if active_id.startswith(partial_job_id):
+                full_job_id = active_id
+                break # Found our match
+
+    if not full_job_id:
         await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
         return
 
-    job_info = context.bot_data['active_mirrors'][job_id]
+    job_info = context.bot_data['active_mirrors'][full_job_id]
     service = job_info['service']
     
     service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
@@ -457,18 +463,18 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         return
 
     try:
-        response = await async_client.post(f"{api_url}/stop/{job_id}", timeout=10)
+        # Use the full_job_id to stop the job
+        response = await async_client.post(f"{api_url}/stop/{full_job_id}", timeout=10)
         response.raise_for_status()
         result = response.json()
 
         if result.get('success'):
             await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
-            # The poller will handle the removal and update the dashboard
         else:
             await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
     except httpx.RequestError as e:
-        logger.error(f"Error stopping job {job_id}: {e}")
+        logger.error(f"Error stopping job {full_job_id}: {e}")
         await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
