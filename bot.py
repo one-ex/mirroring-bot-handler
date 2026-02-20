@@ -138,7 +138,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel:** /stop_{job_id}"
+        f"🚫 **Cancel:** /stop{job_id}"
     )
 
     # Keyboard is no longer used for active jobs
@@ -453,7 +453,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /stop_<job_id> command to cancel a mirror job."""
-    job_id = update.message.text.split('_')[1]
+    job_id = update.message.text
     
     await update.message.reply_text(f"⏳ Mengirim permintaan pembatalan untuk job `{job_id}`...", parse_mode='Markdown')
 
@@ -564,7 +564,7 @@ def setup_bot():
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
