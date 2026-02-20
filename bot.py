@@ -106,7 +106,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
+            f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
         if download_url:
@@ -115,7 +115,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (
-            f"📄 **File Name:** {full_file_name}\n"
+            f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** {status} ❌"
         )
         return {"text": text, "keyboard": []}
