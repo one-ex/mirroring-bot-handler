@@ -138,7 +138,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel Job:** /stop_{job_id}"
+        f"🚫 **Cancel Job:** /stop{job_id}"
     )
 
     # No more keyboard for active jobs
@@ -257,7 +257,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 all_keyboards.extend(progress_data['keyboard'])
 
                 if i < len(active_jobs) - 1:
-                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+                    full_text += "\n\n====================\n\n"
             
             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
@@ -437,9 +437,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles the /stop_<job_id> command to cancel a mirror job."""
+    """Handles the /stop<job_id> command to cancel a mirror job."""
     message_text = update.message.text
-    job_id = message_text.split('_')[1]
+    # Extract job_id by removing the /stop prefix
+    job_id = message_text[5:]
 
     if 'active_mirrors' not in context.bot_data or job_id not in context.bot_data['active_mirrors']:
         await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
@@ -507,7 +508,7 @@ def setup_bot():
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop_'), stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/stop'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
