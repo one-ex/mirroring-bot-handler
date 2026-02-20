@@ -95,16 +95,35 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     """Formats the progress display for a single job and returns text + keyboard."""
     
     job_id = status_info.get('job_id', 'N/A')
-    file_name = job_info['file_info']['filename']
-    if len(file_name) > 20:
-        file_name = file_name[:17] + "..."
-
+    full_file_name = job_info['file_info']['filename']
     size = job_info['file_info']['formatted_size']
     status = status_info.get('status', 'N/A').capitalize()
     progress = status_info.get('progress', 0)
     speed = status_info.get('speed_mbps', 0)
     eta = status_info.get('estimasi', 0)
     download_url = status_info.get('download_url')
+
+    # Handle finished jobs with the new simple format
+    if status in ['Completed', 'Sukses']:
+        text = (
+            f"📄 **File Name:** {full_file_name}\n"
+            f"⚙️ **Status:** Completed ✅\n"
+        )
+        if download_url:
+            text += f"🔗 **Link:** `{download_url}`"
+        return {"text": text, "keyboard": []}
+
+    if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
+        text = (
+            f"📄 **File Name:** {full_file_name}\n"
+            f"⚙️ **Status:** {status} ❌"
+        )
+        return {"text": text, "keyboard": []}
+
+    # Handle active jobs with the detailed dashboard format and inline cancel button
+    file_name_truncated = full_file_name
+    if len(file_name_truncated) > 20:
+        file_name_truncated = file_name_truncated[:17] + "..."
 
     # Progress Bar
     bar_length = 25
@@ -113,27 +132,15 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     text = (
         f"🆔 **Jobs ID:** `{job_id}`\n"
-        f"📄 **File Name:** `{file_name}`\n"
+        f"📄 **File Name:** `{file_name_truncated}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
+        f"〚{bar}〛`{progress:.1f}%`\n"
+        f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
+        f"⏳ **Estimation:** `{eta} Sec`"
     )
 
-    keyboard = []
-    if status in ['Completed', 'Sukses']:
-        text += f"✅ **Selesai!**\n"
-        if download_url:
-            text += f"🔗 **Link:** {download_url}"
-    elif status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
-        text += f"❌ **Gagal!**"
-    else:
-        text += (
-            f"〚{bar}〛`{progress:.1f}%`\n"
-            f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
-            f"⏳ **Estimation:** `{eta} Sec`"
-        )
-        keyboard.append([
-            InlineKeyboardButton("❌ Cancel Mirror", callback_data=f"stop_{job_id}")
-        ])
+    keyboard = [[InlineKeyboardButton("🚫 Cancel Jobs", callback_data=f"stop_{job_id}")]]
     
     return {"text": text, "keyboard": keyboard}
 
@@ -242,15 +249,16 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             reply_markup = None
         else:
             full_text = "📊 Dasbor Progres Aktif:\n\n"
-            for i, j in enumerate(active_jobs):
-                progress_data = format_job_progress(j['job_info'], j['status_info'])
-                full_text += progress_data['text']
-                all_keyboards.extend(progress_data['keyboard'])
+        all_keyboards = []
+        for i, j in enumerate(active_jobs):
+            progress_data = format_job_progress(j['job_info'], j['status_info'])
+            full_text += progress_data['text']
+            all_keyboards.extend(progress_data['keyboard'])
 
-                if i < len(active_jobs) - 1:
-                    full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
-            
-            reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
+            if i < len(active_jobs) - 1:
+                full_text += "\n\n- - - - - - - - - - - - - - - - - - - -\n\n"
+        
+        reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
