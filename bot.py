@@ -138,7 +138,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀 **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳ **Estimation:** `{eta} Sec`\n"
-        f"🚫 **Cancel Job:** /stop{job_id}"
+        f"🚫 **Cancel Job:** `/stop{job_id}`"
     )
 
     # No more keyboard for active jobs
@@ -257,7 +257,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 all_keyboards.extend(progress_data['keyboard'])
 
                 if i < len(active_jobs) - 1:
-                    full_text += "\n\n====================\n\n"
+                    full_text += "\n\n= = = = = = = = = = = = = = = = = = = =\n\n"
             
             reply_markup = InlineKeyboardMarkup(all_keyboards) if all_keyboards else None
 
