@@ -3,6 +3,7 @@ import logging
 import re
 import httpx
 import asyncio
+import uvicorn
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from starlette.applications import Starlette
@@ -572,6 +573,12 @@ async def lifespan(app):
 # Definisikan rute dan aplikasi Starlette
 routes = [
     Route('/health', health_check, methods=['GET']),
-    Route('/webhook', webhook, methods=['POST'])
+    Route('/', webhook, methods=['POST'])
 ]
 app = Starlette(routes=routes, lifespan=lifespan)
+
+if __name__ == "__main__":
+    # Ambil port dari environment variable, dengan default 10000 jika tidak ada
+    # Ini memberikan fleksibilitas sambil memastikan port tetap jika variabel tidak diatur.
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
