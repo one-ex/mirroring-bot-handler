@@ -232,6 +232,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
             finished_jobs_to_remove.append(job_id)
             
+            # Hapus pesan konfirmasi pembatalan jika ada
+            confirmation_message_id = job_info.get('confirmation_message_id')
+            if confirmation_message_id:
+                try:
+                    await bot.delete_message(chat_id=chat_id, message_id=confirmation_message_id)
+                except Exception as e:
+                    logger.warning(f"Failed to delete confirmation message {confirmation_message_id}: {e}")
+
             # Format pesan akhir untuk pekerjaan yang selesai
             final_message_data = format_job_progress(job_info, status_info)
             try:
@@ -479,10 +487,19 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
         result = response.json()
 
         if result.get('success'):
-            await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
-            # Tandai pekerjaan ini sebagai dibatalkan secara manual
+            # Kirim pesan konfirmasi dan simpan ID-nya
+            confirmation_message = await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
+            
+            # Hapus pesan perintah pengguna
+            try:
+                await update.message.delete()
+            except Exception as e:
+                logger.warning(f"Failed to delete user's stop command message: {e}")
+            
+            # Tandai pekerjaan ini sebagai dibatalkan secara manual dan simpan ID pesan konfirmasi
             if full_job_id in context.bot_data['active_mirrors']:
                 context.bot_data['active_mirrors'][full_job_id]['manually_cancelled'] = True
+                context.bot_data['active_mirrors'][full_job_id]['confirmation_message_id'] = confirmation_message.message_id
         else:
             await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
