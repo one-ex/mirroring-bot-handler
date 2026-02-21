@@ -41,14 +41,14 @@ async def webhook(request: Request):
         logger.info(f"Webhook received data: {update_data}")
         update = Update.de_json(update_data, application.bot)
         await application.process_update(update)
-        return PlainTextResponse("OK", 200)
+        return JSONResponse({"status": "ok"})
     except Exception as e:
         logger.error(f"Error processing webhook: {e}")
-        return PlainTextResponse("Error", 500)
+        return JSONResponse({"status": "error"}, status_code=500)
 
 async def health_check(request: Request):
     """Endpoint untuk memeriksa status bot."""
-    return PlainTextResponse("Bot is running!", 200)
+    return JSONResponse({"status": "ok"})
 
 @asynccontextmanager
 async def lifespan(app):
@@ -69,8 +69,8 @@ async def lifespan(app):
 
 # Definisikan rute untuk Starlette
 routes = [
-    Route('/', health_check, methods=['GET']),
-    Route('/webhook', webhook, methods=['POST'])
+    Route('/health', health_check, methods=['GET']),
+    Route('/', webhook, methods=['POST'])
 ]
 app = Starlette(routes=routes, lifespan=lifespan)
 
