@@ -99,7 +99,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳  **Estimation:** `{eta} Sec`\n"
-        f"🚫  /STOP_{job_id.split('-')[0]}"
+        f"🚫  /STOP\\_{job_id.split('-')[0]}"
     )
 
     # No more keyboard for active jobs
