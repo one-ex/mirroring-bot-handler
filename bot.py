@@ -242,7 +242,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             # Ambil username dari pekerjaan pertama untuk judul dashboard
             username = active_jobs[0]['job_info'].get('username', 'N/A')
-            full_text = f"📊 **Dashboard Jobs User:** `{username}`\n\n"
+            full_text = f"📊 <b>Dashboard Jobs User:</b> <code>{user_mention}</code>\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
@@ -412,7 +412,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 user_mention = query.from_user.mention_html()
                 await query.edit_message_text(
                     f"🚀 Pekerjaan pertama dimulai untuk {user_mention}!\n\n"
-                    f"📊 **Dashboard Jobs User:** `{username}`",
+                    f"📊 Dashboard Jobs User: {username}",
                     parse_mode='HTML'
                 )
                 message_id = query.message.message_id
