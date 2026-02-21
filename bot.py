@@ -93,7 +93,6 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"🆔  **User:** `{username}`\n"
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
         f"⚙️  **Status:** `{status}`\n"
@@ -239,7 +238,9 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            full_text = "📊 Dashboard Progress:\n\n"
+            # Ambil username dari pekerjaan pertama untuk judul dashboard
+            username = active_jobs[0]['job_info'].get('username', 'N/A')
+            full_text = f"📊 Dashboard Jobs User: {username}\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
@@ -405,7 +406,8 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 await query.message.delete() # delete the selection message
             else:
                 # This is the first job for this user, edit the current message to be the dashboard
-                await query.edit_message_text("📊 Dashboard Progress:")
+                username = query.from_user.username or f"ID: {query.from_user.id}"
+                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
                 message_id = query.message.message_id
 
             # Store job info
