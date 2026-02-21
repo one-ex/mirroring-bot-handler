@@ -123,7 +123,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle active jobs with the detailed dashboard format
     username = job_info.get('username', 'N/A')
     file_name_truncated = full_file_name
-    if len(file_name_truncated) > 20:
+    if len(file_name_truncated) > 25:
         file_name_truncated = file_name_truncated[:17] + "..."
 
     # Progress Bar
@@ -216,17 +216,28 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         
         status_info = all_statuses.get(job_id)
         
-        # Jika pekerjaan tidak lagi dilaporkan oleh server, asumsikan selesai.
-        if not status_info:
-            status_info = {'status': 'completed'}
-        
-        # Periksa apakah pekerjaan dibatalkan secara manual
-        is_cancelled = job_info.get('manually_cancelled', False)
-        current_status = status_info.get('status')
+        # --- Logika untuk menentukan status akhir, menangani race condition ---
 
-        # Jika dibatalkan secara manual dan statusnya 'failed', ganti menjadi 'cancelled'
-        if is_cancelled and current_status == 'failed':
-            status_info['status'] = 'cancelled'
+        # Jika pekerjaan tidak lagi dilaporkan oleh server, tentukan status berdasarkan flag internal kita.
+        if not status_info:
+            final_status = 'cancelled' if job_info.get('manually_cancelled', False) else 'completed'
+            status_info = {'status': final_status}
+        
+        # Jika pekerjaan dilaporkan oleh server
+        else:
+            current_status = status_info.get('status')
+            is_manually_cancelled = job_info.get('manually_cancelled', False)
+
+            # Masa tenggang untuk status 'failed' untuk mencegah race condition
+            if current_status == 'failed' and not is_manually_cancelled:
+                grace_period_count = job_info.get('grace_period_count', 0)
+                if grace_period_count < 2: # Tunggu 2 siklus polling (sekitar 2 detik)
+                    context.bot_data['active_mirrors'][job_id]['grace_period_count'] = grace_period_count + 1
+                    continue # Lewati finalisasi untuk siklus ini agar flag pembatalan sempat diatur
+
+            # Jika dibatalkan secara manual dan server mengatakan 'failed', flag kita lebih diutamakan.
+            if is_manually_cancelled and current_status == 'failed':
+                status_info['status'] = 'cancelled'
         
         # Tangani pekerjaan yang selesai: kirim pesan terpisah dan tandai untuk dihapus
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
@@ -267,7 +278,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            full_text = "📊 Dasbor Progres Aktif:\n\n"
+            full_text = "📊 Dashboard Progress:\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
@@ -433,7 +444,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 await query.message.delete() # delete the selection message
             else:
                 # This is the first job for this user, edit the current message to be the dashboard
-                await query.edit_message_text("📊 Dasbor Progres Aktif:")
+                await query.edit_message_text("📊 Dashboard Progress:")
                 message_id = query.message.message_id
 
             # Store job info
