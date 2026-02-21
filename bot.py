@@ -290,9 +290,9 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler untuk perintah /start"""
     user = update.effective_user
-    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-    #     return
+    if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+        await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+        return
     await update.message.reply_html(
         rf"👋 Halo {user.mention_html()}! Kirimkan saya sebuah URL untuk memulai.",
         reply_markup=None,
@@ -301,9 +301,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai alur mirror saat mendeteksi URL."""
     user = update.effective_user
-    # if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
-    #     await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
-    #     return ConversationHandler.END
+    if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+        await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+        return ConversationHandler.END
 
     message = update.message
     # Cari entitas URL dalam pesan
@@ -431,7 +431,14 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /STOP_<job_id> command to cancel a mirror job, matching by prefix."""
     message_text = update.message.text
-    partial_job_id = message_text[6:] # e.g., "7539d22c" from "/STOP_7539d22c"
+    # Ekstrak job_id menggunakan regex untuk menangani format /STOP_jobid@botname
+    match = re.search(r'^/STOP_([a-zA-Z0-9\-]+)', message_text)
+    if not match:
+        # Mungkin ini bukan perintah untuk kita, atau formatnya salah.
+        # Kita bisa mengabaikannya atau mengirim pesan bantuan. Untuk saat ini, kita abaikan.
+        return
+
+    partial_job_id = match.group(1)
 
     full_job_id = None
     if 'active_mirrors' in context.bot_data:
