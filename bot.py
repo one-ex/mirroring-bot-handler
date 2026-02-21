@@ -99,7 +99,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳  **Estimation:** `{eta} Sec`\n"
-        f"🚫  /STOP\\_{job_id.split('-')[0]}"
+        f"🚫  /STOP\_{job_id.split('-')[0]}"
     )
 
     # No more keyboard for active jobs
@@ -263,9 +263,9 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     chat_id=chat_id,
                     message_id=message_id,
                     text=full_text,
-                    reply_markup=reply_markup,
                     parse_mode='Markdown',
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
+                    reply_markup=reply_markup
                 )
                 # Update the state after successful edit
                 context.bot_data['dashboard_state'][chat_id] = full_text
