@@ -34,20 +34,6 @@ POLLING_INTERVAL = 1  # Detik
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 async_client = httpx.AsyncClient(timeout=30)
 
-# Definisikan rute untuk Starlette
-routes = [
-    Route('/health', health_check, methods=['GET']),
-    Route('/', webhook, methods=['POST'])
-]
-app = Starlette(routes=routes, lifespan=lifespan)
-
-# Definisikan rute untuk Starlette
-routes = [
-    Route('/health', health_check, methods=['GET']),
-    Route('/', webhook, methods=['POST'])
-]
-app = Starlette(routes=routes, lifespan=lifespan)
-
 
 # Tahapan untuk ConversationHandler
 (SELECTING_ACTION, SELECTING_SERVICE) = range(2)
@@ -512,11 +498,11 @@ def setup_bot():
     # Initialize bot_data dan JobQueue
     application.bot_data['active_mirrors'] = {}
     job_queue = application.job_queue
-    job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=1)
+    job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=0)
 
     # Daftarkan semua handler
     conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & (filters.Entity(MessageEntity.URL) | filters.Entity(MessageEntity.TEXT_LINK)), url_handler)],
+        entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, url_handler)],
         states={
             SELECTING_ACTION: [
                 CallbackQueryHandler(select_service, pattern='^continue$'),
@@ -527,6 +513,7 @@ def setup_bot():
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
+        conversation_timeout=300  # 5 menit
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
