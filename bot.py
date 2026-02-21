@@ -67,17 +67,17 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
-            f"📄 <b>File Name:</b> <code>{full_file_name}</code>\n"
-            f"⚙️ <b>Status:</b> Completed ✅\n"
+            f"📄 **File Name:** `{full_file_name}`\n"
+            f"⚙️ **Status:** Completed ✅\n"
         )
         if download_url:
-            text += f"🔗 <b>Link:</b> <code>{download_url}</code>"
+            text += f"🔗 **Link:** `{download_url}`"
         return {"text": text, "keyboard": []}
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (
-            f"📄 <b>File Name:</b> <code>{full_file_name}</code>\n"
-            f"⚙️ <b>Status:</b> {status} ❌"
+            f"📄 **File Name:** `{full_file_name}`\n"
+            f"⚙️ **Status:** {status} ❌"
         )
         return {"text": text, "keyboard": []}
 
@@ -93,13 +93,13 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"📄  <b>File Name:</b> <code>{file_name_truncated}</code>\n"
-        f"💾  <b>Size:</b> <code>{size}</code>\n"
-        f"⚙️  <b>Status:</b> <code>{status}</code>\n"
-        f"〚{bar}〛<code>{progress:.1f}%</code>\n"
-        f"🚀  <b>Speed:</b> <code>{speed:.2f} MB/s</code>\n"
-        f"⏳  <b>Estimation:</b> <code>{eta} Sec</code>\n"
-        f"🚫  /STOP_{job_id.split('-')[0]}"
+        f"📄  **File Name:** `{file_name_truncated}`\n"
+        f"💾  **Size:** `{size}`\n"
+        f"⚙️  **Status:** `{status}`\n"
+        f"〚{bar}〛`{progress:.1f}%`\n"
+        f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
+        f"⏳  **Estimation:** `{eta} Sec`\n"
+        f"🚫  /STOP\_{job_id.split('-')[0]}"
     )
 
     # No more keyboard for active jobs
@@ -213,13 +213,11 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             # Format pesan akhir untuk pekerjaan yang selesai
             final_message_data = format_job_progress(job_info, status_info)
-            user_mention = job_info.get('user_mention', '')
-            
             try:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=f"{user_mention}\n\n{final_message_data['text']}",
-                    parse_mode='HTML',
+                    text=final_message_data['text'],
+                    parse_mode='Markdown',
                     disable_web_page_preview=True
                 )
             except Exception as e:
@@ -242,7 +240,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             # Ambil username dari pekerjaan pertama untuk judul dashboard
             username = active_jobs[0]['job_info'].get('username', 'N/A')
-            full_text = f"📊 <b>Dashboard Jobs User:</b> <code>{user_mention}</code>\n\n"
+            full_text = f"📊 **Dashboard Jobs User:** `{username}`\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
@@ -266,7 +264,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     message_id=message_id,
                     text=full_text,
                     reply_markup=reply_markup,
-                    parse_mode='HTML',
+                    parse_mode='Markdown',
                     disable_web_page_preview=True
                 )
                 # Update the state after successful edit
@@ -345,12 +343,12 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await processing_message.edit_text(
-        f"📜 <b>Info File:</b>\n"
-        f"<b>Nama:</b> <code>{info['filename']}</code>\n"
-        f"<b>Ukuran:</b> <code>{info['formatted_size']}</code>\n\n"
+        f"📜 **Info File:**\n"
+        f"**Nama:** `{info['filename']}`\n"
+        f"**Ukuran:** `{info['formatted_size']}`\n\n"
         f"Lanjutkan proses mirroring?",
         reply_markup=reply_markup,
-        parse_mode='HTML'
+        parse_mode='Markdown'
     )
     
     return SELECTING_ACTION
@@ -409,12 +407,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             else:
                 # This is the first job for this user, edit the current message to be the dashboard
                 username = query.from_user.username or f"ID: {query.from_user.id}"
-                user_mention = query.from_user.mention_html()
-                await query.edit_message_text(
-                    f"🚀 Pekerjaan pertama dimulai untuk {user_mention}!\n\n"
-                    f"📊 Dashboard Jobs User: {username}",
-                    parse_mode='HTML'
-                )
+                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
                 message_id = query.message.message_id
 
             # Store job info
@@ -423,8 +416,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 'message_id': message_id,
                 'file_info': context.user_data['file_info'],
                 'service': service,
-                'username': query.from_user.username or f"ID: {query.from_user.id}",
-                'user_mention': query.from_user.mention_html()
+                'username': query.from_user.username or f"ID: {query.from_user.id}"
             }
             
         else:
