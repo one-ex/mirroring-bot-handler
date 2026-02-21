@@ -121,6 +121,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         return {"text": text, "keyboard": []}
 
     # Handle active jobs with the detailed dashboard format
+    username = job_info.get('username', 'N/A')
     file_name_truncated = full_file_name
     if len(file_name_truncated) > 20:
         file_name_truncated = file_name_truncated[:17] + "..."
@@ -129,8 +130,6 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar_length = 25
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
-    
-    username = job_info.get('username', 'N/A')
 
     text = (
         f"🆔 **User:** `{username}`\n"
@@ -435,7 +434,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 'message_id': message_id,
                 'file_info': context.user_data['file_info'],
                 'service': service,
-                'username': query.effective_user.username or f"ID: {query.effective_user.id}"
+                'username': query.from_user.username or f"ID: {query.from_user.id}"
             }
             
         else:
