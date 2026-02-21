@@ -34,38 +34,12 @@ POLLING_INTERVAL = 1  # Detik
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 async_client = httpx.AsyncClient(timeout=30)
 
-async def webhook(request: Request):
-    """Endpoint webhook untuk menerima pembaruan dari Telegram."""
-    try:
-        update_data = await request.json()
-        logger.info(f"Webhook received data: {update_data}")
-        update = Update.de_json(update_data, application.bot)
-        await application.process_update(update)
-        return JSONResponse({"status": "ok"})
-    except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
-        return JSONResponse({"status": "error"}, status_code=500)
-
-async def health_check(request: Request):
-    """Endpoint untuk memeriksa status bot."""
-    return JSONResponse({"status": "ok"})
-
-@asynccontextmanager
-async def lifespan(app):
-    """Lifespan manager for the application."""
-    global async_client
-    logger.info("Starting application lifespan...")
-    await application.initialize()
-    # Jalankan setup webhook di latar belakang agar tidak memblokir startup
-    asyncio.create_task(setup_webhook())
-    setup_bot()
-    await application.start()
-    logger.info("Application has started.")
-    yield
-    logger.info("Stopping application lifespan...")
-    await application.stop()
-    await async_client.aclose()
-    logger.info("Application has stopped.")
+# Definisikan rute untuk Starlette
+routes = [
+    Route('/health', health_check, methods=['GET']),
+    Route('/', webhook, methods=['POST'])
+]
+app = Starlette(routes=routes, lifespan=lifespan)
 
 # Definisikan rute untuk Starlette
 routes = [
