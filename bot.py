@@ -129,9 +129,11 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar_length = 25
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
+    
+    username = job_info.get('username', 'N/A')
 
     text = (
-        f"🆔 **Jobs ID:** `{job_id}`\n"
+        f"🆔 **User:** `{username}`\n"
         f"📄 **File Name:** `{file_name_truncated}`\n"
         f"💾 **Size:** `{size}`\n"
         f"⚙️ **Status:** `{status}`\n"
@@ -432,7 +434,8 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 'chat_id': chat_id,
                 'message_id': message_id,
                 'file_info': context.user_data['file_info'],
-                'service': service
+                'service': service,
+                'username': query.effective_user.username or f"ID: {query.effective_user.id}"
             }
             
         else:
