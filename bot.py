@@ -56,7 +56,8 @@ async def lifespan(app):
     global async_client
     logger.info("Starting application lifespan...")
     await application.initialize()
-    await setup_webhook()
+    # Jalankan setup webhook di latar belakang agar tidak memblokir startup
+    asyncio.create_task(setup_webhook())
     setup_bot()
     await application.start()
     logger.info("Application has started.")
