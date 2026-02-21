@@ -407,7 +407,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             else:
                 # This is the first job for this user, edit the current message to be the dashboard
                 username = query.from_user.username or f"ID: {query.from_user.id}"
-                await query.edit_message_text(f"📊 Dashboard Jobs User: `{username}`")
+                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
                 message_id = query.message.message_id
 
             # Store job info
