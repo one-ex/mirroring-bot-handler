@@ -5,3 +5,4 @@ uvicorn
 asgiref
 starlette
 httpx
+psycopg2-binary

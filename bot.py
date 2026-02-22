@@ -1,5 +1,6 @@
 import os
 import logging
+import psycopg2
 import re
 import httpx
 import asyncio
@@ -29,6 +30,8 @@ GOFILE_API_URL = os.getenv('GOFILE_API_URL')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 POLLING_INTERVAL = 1  # Detik
+DATABASE_URL = os.getenv('DATABASE_URL')
+WEB_AUTH_URL = os.getenv('WEB_AUTH_URL')
 
 # --- Inisialisasi Global ---
 application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -106,6 +109,23 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     keyboard = []
     
     return {"text": text, "keyboard": keyboard}
+
+def check_gdrive_token(user_id: int) -> bool:
+    """Checks if a user has a GDrive token in the database."""
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL tidak diatur.")
+        return False
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM user_tokens WHERE telegram_user_id = %s", (user_id,))
+        exists = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return exists
+    except psycopg2.Error as e:
+        logger.error(f"Kesalahan database saat memeriksa token GDrive: {e}")
+        return False
 
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
@@ -370,7 +390,8 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     keyboard = [
         [InlineKeyboardButton("📁 GoFile", callback_data='gofile'),
-         InlineKeyboardButton("💧 PixelDrain", callback_data='pixeldrain')]
+         InlineKeyboardButton("💧 PixelDrain", callback_data='pixeldrain')],
+        [InlineKeyboardButton("☁️ Google Drive", callback_data='gdrive')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -384,8 +405,32 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     service = query.data
     url = context.user_data.get('url')
-    
+    user_id = query.from_user.id
+
     await query.answer()
+
+    if service == 'gdrive':
+        if not WEB_AUTH_URL:
+            await query.edit_message_text("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel.")
+            return ConversationHandler.END
+
+        has_token = check_gdrive_token(user_id)
+        if not has_token:
+            login_url = f"{WEB_AUTH_URL}/login?user_id={user_id}"
+            keyboard = [
+                [InlineKeyboardButton("🔐 Login via Google", url=login_url)],
+                [InlineKeyboardButton("❌ Batal", callback_data='cancel_gdrive_login')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text="Anda belum login ke Google Drive. Silakan login untuk melanjutkan.",
+                reply_markup=reply_markup
+            )
+            return SELECTING_SERVICE # Tetap di state ini untuk menunggu pembatalan
+        else:
+            # TODO: Implement GDrive mirror start logic
+            await query.edit_message_text("✅ Anda sudah login. (Logika mirror GDrive akan ditambahkan di sini)")
+            return ConversationHandler.END
     
     service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
     api_url = service_map.get(service)
@@ -435,6 +480,14 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     except httpx.RequestError as e:
         await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
 
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def cancel_gdrive_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Membatalkan proses login GDrive."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Login Google Drive dibatalkan.")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -528,7 +581,8 @@ def setup_bot():
                 CallbackQueryHandler(cancel, pattern='^cancel$'),
             ],
             SELECTING_SERVICE: [
-                CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain)$'),
+                CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain|gdrive)$'),
+                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
