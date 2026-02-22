@@ -91,7 +91,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         file_name_truncated = file_name_truncated[:17] + "..."
 
     # Progress Bar
-    bar_length = 25
+    bar_length = 20
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
