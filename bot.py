@@ -99,7 +99,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
         f"⚙️  **Status:** `{status}`\n"
-        f"〚{bar}〛**{progress:.1f}%** \n"
+        f"〚{bar}〛`{progress:.1f}%`\n"
         f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳  **Estimation:** `{eta} Sec`\n"
         f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
@@ -260,7 +260,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             # Ambil username dari pekerjaan pertama untuk judul dashboard
             username = active_jobs[0]['job_info'].get('username', 'N/A')
-            full_text = f"📊 **Dashboard Jobs User: {username}**\n\n"
+            full_text = f"📊 **Dashboard Jobs User:** `{username}`\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
