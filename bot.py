@@ -99,7 +99,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
         f"⚙️  **Status:** `{status}`\n"
-        f"〚{bar}〛`{progress:.1f}%`\n"
+        f"〚{bar}〛**{progress:.1f}%**\n"
         f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳  **Estimation:** `{eta} Sec`\n"
         f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
