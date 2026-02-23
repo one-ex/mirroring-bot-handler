@@ -32,6 +32,7 @@ AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_ID
 POLLING_INTERVAL = 1  # Detik
 DATABASE_URL = os.getenv('DATABASE_URL')
 WEB_AUTH_URL = os.getenv('WEB_AUTH_URL')
+GDRIVE_API_URL = os.getenv('GDRIVE_API_URL')
 
 # --- Inisialisasi Global ---
 application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -158,7 +159,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # Fetch status from both services
     all_statuses = {}
-    service_urls = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    service_urls = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL, 'gdrive': GDRIVE_API_URL}
     
     tasks = []
     for service, base_url in service_urls.items():
@@ -429,10 +430,50 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             return SELECTING_SERVICE # Tetap di state ini untuk menunggu pembatalan
         else:
             # TODO: Implement GDrive mirror start logic
-            await query.edit_message_text("✅ Anda sudah login. (Logika mirror GDrive akan ditambahkan di sini)")
+            await query.edit_message_text("Memulai proses mirror ke Google Drive...")
+            
+            try:
+                response = await async_client.post(
+                    f"{GDRIVE_API_URL}/mirror", 
+                    json={'url': url, 'user_id': str(user_id)}, 
+                    timeout=15
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get('success') and result.get('job_id'):
+                    job_id = result['job_id']
+                    chat_id = query.message.chat_id
+                    
+                    if 'active_mirrors' not in context.bot_data:
+                        context.bot_data['active_mirrors'] = {}
+
+                    existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+                    if existing_jobs:
+                        message_id = existing_jobs[0]['message_id']
+                        await query.message.delete()
+                    else:
+                        username = query.from_user.username or f"ID: {query.from_user.id}"
+                        await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
+                        message_id = query.message.message_id
+
+                    context.bot_data['active_mirrors'][job_id] = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'file_info': context.user_data['file_info'],
+                        'service': 'gdrive',
+                        'username': query.from_user.username or f"ID: {query.from_user.id}"
+                    }
+                else:
+                    await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+            except httpx.RequestError as e:
+                await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror GDrive: {e}")
+
+            context.user_data.clear()
             return ConversationHandler.END
     
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL, 'gdrive': GDRIVE_API_URL}
     api_url = service_map.get(service)
 
     if not api_url:
