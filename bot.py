@@ -536,7 +536,8 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     """Handles the /STOP_<job_id> command to cancel a mirror job, matching by prefix."""
     message_text = update.message.text
     # Ekstrak job_id menggunakan regex untuk menangani format /STOP_jobid@botname
-    match = re.search(r'^/STOP_([a-zA-Z0-9\-]+)', message_text)
+    # Regex diperbarui untuk menyertakan '_' jika job_id mengandungnya.
+    match = re.search(r'^/STOP_([a-zA-Z0-9\-_]+)', message_text)
     if not match:
         # Mungkin ini bukan perintah untuk kita, atau formatnya salah.
         # Kita bisa mengabaikannya atau mengirim pesan bantuan. Untuk saat ini, kita abaikan.
@@ -558,7 +559,12 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     job_info = context.bot_data['active_mirrors'][full_job_id]
     service = job_info['service']
     
-    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL}
+    # Menambahkan GDRIVE_API_URL ke dalam map
+    service_map = {
+        'gofile': GOFILE_API_URL, 
+        'pixeldrain': PIXELDRAIN_API_URL,
+        'gdrive': GDRIVE_API_URL
+    }
     api_url = service_map.get(service)
 
     if not api_url:
@@ -567,7 +573,9 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
 
     try:
         # Use the full_job_id to stop the job
-        response = await async_client.post(f"{api_url}/stop/{full_job_id}", timeout=10)
+        # Endpoint untuk GDrive adalah /cancel, bukan /stop
+        endpoint = "cancel" if service == 'gdrive' else "stop"
+        response = await async_client.post(f"{api_url}/{endpoint}/{full_job_id}", timeout=10)
         response.raise_for_status()
         result = response.json()
 
