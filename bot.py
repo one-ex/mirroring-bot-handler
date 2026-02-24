@@ -536,8 +536,8 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     """Handles the /STOP_<job_id> command to cancel a mirror job, matching by prefix."""
     message_text = update.message.text
     # Ekstrak job_id menggunakan regex untuk menangani format /STOP_jobid@botname
-    # Regex ini sekarang secara eksplisit menangani @botname opsional di akhir.
-    match = re.search(r'^/STOP_([a-zA-Z0-9\-]+)(?:@\w+)?', message_text)
+    # Regex diperbarui untuk menyertakan '_' jika job_id mengandungnya.
+    match = re.search(r'^/STOP_([a-zA-Z0-9\-_]+)', message_text)
     if not match:
         # Mungkin ini bukan perintah untuk kita, atau formatnya salah.
         # Kita bisa mengabaikannya atau mengirim pesan bantuan. Untuk saat ini, kita abaikan.
@@ -559,6 +559,7 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
     job_info = context.bot_data['active_mirrors'][full_job_id]
     service = job_info['service']
     
+    # Menambahkan GDRIVE_API_URL ke dalam map
     service_map = {
         'gofile': GOFILE_API_URL, 
         'pixeldrain': PIXELDRAIN_API_URL,
@@ -572,7 +573,8 @@ async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFA
 
     try:
         # Use the full_job_id to stop the job
-        endpoint = "stop" if service == 'gdrive' else "cancel"
+        # Endpoint untuk semua service adalah /stop
+        endpoint = "stop"
         response = await async_client.post(f"{api_url}/{endpoint}/{full_job_id}", timeout=10)
         response.raise_for_status()
         result = response.json()
@@ -637,7 +639,6 @@ def setup_bot():
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    # Menggunakan filter yang lebih fleksibel untuk menangani format grup (@botname)
     application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/STOP_'), stop_mirror_command_handler))
     logger.info("Bot handlers and job queue have been set up.")
 
