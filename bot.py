@@ -678,11 +678,47 @@ async def lifespan(app):
     """Lifespan manager for the application."""
     global async_client
     logger.info("Starting application lifespan...")
+    
+    # --- PING LAYANAN MIRRORING SAAT STARTUP ---
+    async def ping_services():
+        """Mengirim permintaan GET ke endpoint /health untuk 'membangunkan' layanan."""
+        services_to_ping = {
+            "GoFile": GOFILE_API_URL,
+            "PixelDrain": PIXELDRAIN_API_URL,
+            "Google Drive": GDRIVE_API_URL
+        }
+        
+        ping_tasks = []
+        for service_name, base_url in services_to_ping.items():
+            if base_url:
+                health_url = f"{base_url}/health"
+                ping_tasks.append(async_client.get(health_url, timeout=20))
+                logger.info(f"Pinging {service_name} at {health_url}...")
+            else:
+                logger.warning(f"URL untuk layanan {service_name} tidak diatur, ping dilewati.")
+
+        results = await asyncio.gather(*ping_tasks, return_exceptions=True)
+        
+        for i, result in enumerate(results):
+            service_name = list(services_to_ping.keys())[i]
+            if isinstance(result, httpx.RequestError):
+                logger.warning(f"Ping ke {service_name} gagal (kemungkinan sedang bangun): {result}")
+            elif isinstance(result, Exception):
+                logger.error(f"Error saat ping ke {service_name}: {result}")
+            elif result.status_code == 200:
+                logger.info(f"Ping ke {service_name} berhasil, layanan sudah aktif.")
+            else:
+                logger.warning(f"Ping ke {service_name} mengembalikan status {result.status_code}.")
+
     await application.initialize()
     asyncio.create_task(setup_webhook())
     setup_bot()
     await application.start()
-    logger.info("Application has started.")
+    
+    # Jalankan ping setelah bot sepenuhnya dimulai
+    asyncio.create_task(ping_services())
+    
+    logger.info("Application has started and services are being pinged.")
     yield
     logger.info("Stopping application lifespan...")
     await application.stop()
