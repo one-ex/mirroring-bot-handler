@@ -156,10 +156,6 @@ async def get_file_info_from_url(url: str) -> dict:
 async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The global poller task to update all active jobs."""
     bot = context.bot
-
-    # If there are no active mirrors, do nothing.
-    if not context.bot_data.get('active_mirrors'):
-        return
     
     # Fetch status from both services
     all_statuses = {}
@@ -308,6 +304,21 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         stale_chat_ids = [chat_id for chat_id in context.bot_data['dashboard_state'] if chat_id not in active_chat_ids]
         for chat_id in stale_chat_ids:
             del context.bot_data['dashboard_state'][chat_id]
+
+    # Hentikan poller jika tidak ada lagi pekerjaan aktif
+    if not context.bot_data.get('active_mirrors'):
+        jobs = application.job_queue.get_jobs_by_name('update_progress')
+        for job in jobs:
+            job.schedule_removal()
+            logger.info("Polling job 'update_progress' stopped as there are no active jobs.")
+
+
+    # --- Logika untuk menghentikan poller jika tidak ada lagi pekerjaan ---
+    if not context.bot_data.get('active_mirrors'):
+        jobs = context.application.job_queue.get_jobs_by_name('update_progress_job')
+        for job in jobs:
+            job.schedule_removal()
+            logger.info("All mirror jobs finished. Progress poller stopped.")
 
 
 # --- Fungsi Utama Bot ---
@@ -468,6 +479,16 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         'service': 'gdrive',
                         'username': query.from_user.username or f"ID: {query.from_user.id}"
                     }
+                    
+                    # Mulai poller jika belum berjalan
+                    if not application.job_queue.get_jobs_by_name('update_progress'):
+                        application.job_queue.run_repeating(
+                            update_progress, 
+                            interval=POLLING_INTERVAL, 
+                            first=0, 
+                            name='update_progress'
+                        )
+                        logger.info("Polling job 'update_progress' started.")
                 else:
                     await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
 
@@ -518,6 +539,16 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 'service': service,
                 'username': query.from_user.username or f"ID: {query.from_user.id}"
             }
+            
+            # Mulai poller jika belum berjalan
+            if not application.job_queue.get_jobs_by_name('update_progress'):
+                application.job_queue.run_repeating(
+                    update_progress, 
+                    interval=POLLING_INTERVAL, 
+                    first=0, 
+                    name='update_progress'
+                )
+                logger.info("Polling job 'update_progress' started.")
             
         else:
             await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
