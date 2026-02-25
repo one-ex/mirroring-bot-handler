@@ -75,4 +75,4 @@ routes = [
     Route("/health", endpoint=health_check, methods=["GET"]),
 ]
 
-app = Starlette(routes=routes, on_startup=[lifespan.__wrapped__])
+app = Starlette(routes=routes, lifespan=lifespan)
