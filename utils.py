@@ -1,75 +1,117 @@
+import re
+import os
+from urllib.parse import urlparse
 import httpx
+import psycopg2
 import logging
-from config import async_client, GDRIVE_API_URL, WEB_AUTH_URL
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-def format_bytes(size):
-    if size is None:
-        return ""
+def format_bytes(size: int) -> str:
+    """Formats size in bytes to a human-readable string."""
+    if not size or size == 0:
+        return "0 B"
     power = 1024
     n = 0
-    power_labels = {0: "", 1: "K", 2: "M", 3: "G", 4: "T"}
-    while size > power and n < len(power_labels):
+    power_labels = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    while size >= power and n < len(power_labels) - 1:
         size /= power
         n += 1
-    return f"{size:.2f} {power_labels[n]}B"
+    return f"{size:.2f} {power_labels[n]}"
 
+def format_job_progress(job_info: dict, status_info: dict) -> dict:
+    """Formats the progress display for a single job and returns text + keyboard."""
+    
+    job_id = status_info.get('job_id', 'N/A')
+    full_file_name = job_info['file_info']['filename']
+    size = job_info['file_info']['formatted_size']
+    status = status_info.get('status', 'N/A').capitalize()
+    progress = status_info.get('progress', 0)
+    speed = status_info.get('speed_mbps', 0)
+    eta = status_info.get('estimasi', 0)
+    download_url = status_info.get('download_url')
 
-def format_job_progress(job):
-    if not job:
-        return "Job not found or has been removed."
+    # Handle finished jobs with the new simple format
+    if status in ['Completed', 'Sukses']:
+        text = (
+            f"📄 **File Name:** `{full_file_name}`\n"
+            f"⚙️ **Status:** Completed ✅\n"
+        )
+        if download_url:
+            text += f"🔗 **Link:** `{download_url}`"
+        return {"text": text, "keyboard": []}
 
-    progress = job.get("progress", 0)
-    speed = job.get("speed", 0)
-    total_size = job.get("total_size", 0)
-    file_name = job.get("file_name", "N/A")
+    if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
+        text = (
+            f"📄 **File Name:** `{full_file_name}`\n"
+            f"⚙️ **Status:** {status} ❌"
+        )
+        return {"text": text, "keyboard": []}
 
-    progress_bar_length = 10
-    filled_length = int(progress_bar_length * progress / 100)
-    bar = "▓" * filled_length + "░" * (progress_bar_length - filled_length)
+    # Handle active jobs with the detailed dashboard format
+    username = job_info.get('username', 'N/A')
+    file_name_truncated = full_file_name
+    if len(file_name_truncated) > 25:
+        file_name_truncated = file_name_truncated[:17] + "..."
 
-    total_size_formatted = format_bytes(total_size)
-    speed_formatted = f"{format_bytes(speed)}/s" if speed else "N/A"
+    # Progress Bar
+    bar_length = 20
+    filled_length = int(bar_length * progress / 100)
+    bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
-    return (
-        f"⬇️ **File:** `{file_name}`\n"
-        f"⚙️ **Engine:** `{job.get('service', 'N/A')}`\n"
-        f"📦 **Size:** `{total_size_formatted}`\n"
-        f"📊 **Progress:** `{progress:.2f}%`\n"
-        f"[{bar}]\n"
-        f"🚀 **Speed:** `{speed_formatted}`\n"
-        f"⚡ **Status:** `{job.get('status', 'N/A')}`"
+    text = (
+        f"📄  **File Name:** `{file_name_truncated}`\n"
+        f"💾  **Size:** `{size}`\n"
+        f"⚙️  **Status:** `{status}`\n"
+        f"〚{bar}〛**{progress:.1f}%**\n"
+        f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
+        f"⏳  **Estimation:** `{eta} Sec`\n"
+        f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
     )
 
-async def check_gdrive_token(user_id):
-    """Check if a valid Google Drive token exists for the user."""
-    try:
-        response = await async_client.get(f"{GDRIVE_API_URL}/check_token/{user_id}")
-        if response.status_code == 200 and response.json().get("token_exists"):
-            return True
-    except httpx.RequestError as e:
-        logger.error(f"Error checking Google Drive token for user {user_id}: {e}")
-    return False
+    # No more keyboard for active jobs
+    keyboard = []
+    
+    return {"text": text, "keyboard": keyboard}
 
-async def get_file_info_from_url(url: str):
-    """Get file information (name and size) from a URL."""
+def check_gdrive_token(user_id: int) -> bool:
+    """Checks if a user has a GDrive token in the database."""
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL tidak diatur.")
+        return False
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.head(url, follow_redirects=True)
-            response.raise_for_status()
-            content_disposition = response.headers.get("content-disposition")
-            file_name = "Unknown"
-            if content_disposition:
-                parts = content_disposition.split(";")
-                for part in parts:
-                    if "filename=" in part:
-                        file_name = part.split("=")[1].strip().strip('"')
-                        break
-            file_size = int(response.headers.get("content-length", 0))
-            return file_name, file_size
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM user_tokens WHERE telegram_user_id = %s", (user_id,))
+        exists = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return exists
+    except psycopg2.Error as e:
+        logger.error(f"Kesalahan database saat memeriksa token GDrive: {e}")
+        return False
+
+async def get_file_info_from_url(url: str, client: httpx.AsyncClient) -> dict:
+    """Makes a request to get file info without downloading the whole file."""
+    try:
+        async with client.stream("GET", url, follow_redirects=True, timeout=15) as r:
+            r.raise_for_status()
+            size = int(r.headers.get('content-length', 0))
+            filename = "N/A"
+            if 'content-disposition' in r.headers:
+                d = r.headers['content-disposition']
+                matches = re.findall('filename=\"?([^\"]+)\"?', d)
+                if matches:
+                    filename = matches[0]
+            if filename == "N/A": 
+                parsed_url = urlparse(str(r.url))
+                filename = os.path.basename(parsed_url.path) or "downloaded_file"
+            return {"success": True, "filename": filename, "size": size, "formatted_size": format_bytes(size)}
     except httpx.RequestError as e:
-        logger.error(f"Error getting file info from URL {url}: {e}")
-        return "Unknown", 0
+        logger.error(f"Error getting file info for {url}: {e}")
+        return {"success": False, "error": "Gagal mengakses URL. Pastikan URL valid dan dapat diakses."}
+    except Exception as e:
+        logger.error(f"Unexpected error in get_file_info: {e}")
+        return {"success": False, "error": "Terjadi kesalahan tak terduga saat memeriksa URL."}

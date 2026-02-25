@@ -1,210 +1,339 @@
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import httpx
+from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from config import (
-    SELECTING_ACTION,
-    SELECTING_SERVICE,
-    AUTHORIZED_USER_IDS,
-    active_jobs,
-    async_client,
-    GOFILE_API_URL,
-    PIXELDRAIN_API_URL,
-    GDRIVE_API_URL,
-    WEB_AUTH_URL,
-)
-from utils import check_gdrive_token, get_file_info_from_url, format_job_progress
 
-logger = logging.getLogger(__name__)
+from config import (
+    AUTHORIZED_USER_IDS, URL_HANDLER, SELECT_SERVICE, START_MIRROR, GDRIVE_LOGIN_CANCEL,
+    GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, WEB_AUTH_URL, POLLING_INTERVAL
+)
+from utils import format_job_progress, check_gdrive_token, get_file_info_from_url
+
+# --- Fungsi Utama Bot ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message when the /start command is issued."""
+    """Handler untuk perintah /start"""
     user = update.effective_user
-    if user.id not in AUTHORIZED_USER_IDS:
-        await update.message.reply_html(
-            "🚫 You are not authorized to use this bot."
-        )
-        return
+    chat = update.effective_chat
+
+    # Terapkan otorisasi hanya di chat pribadi
+    if chat.type == 'private':
+        if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+            await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini di chat pribadi.")
+            return
+
     await update.message.reply_html(
-        f"👋 Hello {user.mention_html()}!\n\n"
-        "I am a mirroring bot. Send me a direct download link and I will upload it to a supported host.\n\n"
-        "For help, use /help."
+        rf"👋 Halo {user.mention_html()}! Kirimkan saya sebuah URL untuk memulai.",
+        reply_markup=None,
     )
 
 async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles user-sent URLs and asks for the desired service."""
-    user_id = update.effective_user.id
-    if user_id not in AUTHORIZED_USER_IDS:
-        await update.message.reply_text("🚫 You are not authorized to use this bot.")
+    """Memulai alur mirror saat mendeteksi URL."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    # Terapkan otorisasi hanya di chat pribadi
+    if chat.type == 'private':
+        if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+            await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini di chat pribadi.")
+            return ConversationHandler.END
+
+    message = update.message
+    # Cari entitas URL dalam pesan
+    url_entities = message.parse_entities(types=[MessageEntity.URL])
+    if not url_entities:
+        # Jika tidak ada entitas URL, coba cari tautan teks biasa
+        text_link_entities = message.parse_entities(types=[MessageEntity.TEXT_LINK])
+        if not text_link_entities:
+            await message.reply_text("❌ URL tidak ditemukan dalam pesan.")
+            return ConversationHandler.END
+        # Ambil URL dari entitas text_link pertama
+        url = list(text_link_entities.keys())[0].url
+    else:
+        # Ambil URL dari entitas URL pertama
+        url = list(url_entities.values())[0]
+
+    context.user_data['url'] = url
+    
+    processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
+    
+    # Get async client from context or global
+    client = context.bot_data.get('async_client') or httpx.AsyncClient(timeout=30)
+    info = await get_file_info_from_url(url, client)
+    
+    if not info.get('success'):
+        await processing_message.edit_text(f"❌ {info.get('error', 'Gagal mendapatkan info file.')}")
         return ConversationHandler.END
 
-    url = update.message.text
-    context.user_data["url"] = url
+    if not info.get('size'):
+        await processing_message.edit_text("❌ Gagal mendapatkan ukuran file atau ukuran file adalah 0. Proses dibatalkan.")
+        return ConversationHandler.END
 
-    file_name, file_size = await get_file_info_from_url(url)
-    context.user_data["file_name"] = file_name
-    context.user_data["file_size"] = file_size
+    context.user_data['file_info'] = info
 
     keyboard = [
-        [
-            InlineKeyboardButton("GoFile", callback_data="gofile"),
-            InlineKeyboardButton("PixelDrain", callback_data="pixeldrain"),
-        ],
-        [InlineKeyboardButton("Google Drive", callback_data="gdrive")],
-        [InlineKeyboardButton("Cancel", callback_data="cancel")],
+        [InlineKeyboardButton("✅ Lanjutkan", callback_data='continue'),
+         InlineKeyboardButton("❌ Batal", callback_data='cancel')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Choose a service to mirror the file to:", reply_markup=reply_markup)
-    return SELECTING_SERVICE
+    
+    await processing_message.edit_text(
+        f"📜 **Info File:**\n"
+        f"**Nama:** `{info['filename']}`\n"
+        f"**Ukuran:** `{info['formatted_size']}`\n\n"
+        f"Lanjutkan proses mirroring?",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    
+    return URL_HANDLER
 
 async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handles the service selection and initiates the mirroring process."""
+    """Meminta pengguna memilih layanan mirror."""
     query = update.callback_query
     await query.answer()
-    service = query.data
-    context.user_data["service"] = service
 
-    if service == "cancel":
-        await query.edit_message_text("Operation cancelled.")
-        return ConversationHandler.END
+    keyboard = [
+        [InlineKeyboardButton("📁 GoFile", callback_data='gofile'),
+         InlineKeyboardButton("💧 PixelDrain", callback_data='pixeldrain')],
+        [InlineKeyboardButton("☁️ Google Drive", callback_data='gdrive')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await query.edit_message_text(f"Starting mirror to {service.title()}...")
-    return await start_mirror(update, context)
+    await query.edit_message_text(
+        text="Pilih layanan tujuan:", reply_markup=reply_markup
+    )
+    return SELECT_SERVICE
 
 async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the mirroring process based on the selected service."""
+    """Memulai proses mirror setelah layanan dipilih."""
     query = update.callback_query
+    service = query.data
+    url = context.user_data.get('url')
     user_id = query.from_user.id
-    url = context.user_data["url"]
-    service = context.user_data["service"]
-    file_name = context.user_data.get("file_name", "Unknown")
-    file_size = context.user_data.get("file_size", 0)
 
-    if service.lower() == "gdrive":
-        if not await check_gdrive_token(user_id):
-            auth_url = f"{WEB_AUTH_URL}/auth/{user_id}"
+    await query.answer()
+
+    if service == 'gdrive':
+        if not WEB_AUTH_URL:
+            await query.edit_message_text("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel.")
+            return ConversationHandler.END
+
+        has_token = check_gdrive_token(user_id)
+        if not has_token:
+            login_url = f"{WEB_AUTH_URL}/login?user_id={user_id}"
             keyboard = [
-                [InlineKeyboardButton("Login to Google Drive", url=auth_url)],
-                [InlineKeyboardButton("Cancel", callback_data="cancel_gdrive_login")],
+                [InlineKeyboardButton("🔐 Login via Google", url=login_url)],
+                [InlineKeyboardButton("❌ Batal", callback_data='cancel_gdrive_login')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                "You need to authorize Google Drive access first.",
-                reply_markup=reply_markup,
+                text="Anda belum login ke Google Drive. Silakan login untuk melanjutkan.",
+                reply_markup=reply_markup
             )
-            return ConversationHandler.END
+            return SELECT_SERVICE # Tetap di state ini untuk menunggu pembatalan
+        else:
+            await query.edit_message_text("Memulai proses mirror ke Google Drive...")
+            
+            try:
+                client = context.bot_data.get('async_client') or httpx.AsyncClient(timeout=30)
+                response = await client.post(
+                    f"{GDRIVE_API_URL}/mirror", 
+                    json={'url': url, 'user_id': str(user_id)}, 
+                    timeout=15
+                )
+                response.raise_for_status()
+                result = response.json()
 
-    service_map = {
-        "gofile": GOFILE_API_URL,
-        "pixeldrain": PIXELDRAIN_API_URL,
-        "gdrive": GDRIVE_API_URL,
-    }
-    api_url = service_map.get(service.lower())
+                if result.get('success') and result.get('job_id'):
+                    job_id = result['job_id']
+                    chat_id = query.message.chat_id
+                    
+                    if 'active_mirrors' not in context.bot_data:
+                        context.bot_data['active_mirrors'] = {}
+
+                    existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+                    if existing_jobs:
+                        message_id = existing_jobs[0]['message_id']
+                        await query.message.delete()
+                    else:
+                        username = query.from_user.username or f"ID: {query.from_user.id}"
+                        await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
+                        message_id = query.message.message_id
+
+                    context.bot_data['active_mirrors'][job_id] = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'file_info': context.user_data['file_info'],
+                        'service': 'gdrive',
+                        'username': query.from_user.username or f"ID: {query.from_user.id}"
+                    }
+                    
+                    # Mulai poller jika belum berjalan
+                    if not context.application.job_queue.get_jobs_by_name('update_progress'):
+                        context.application.job_queue.run_repeating(
+                            context.bot_data.get('update_progress_func'), 
+                            interval=POLLING_INTERVAL, 
+                            first=0, 
+                            name='update_progress'
+                        )
+                        context.application.logger.info("Polling job 'update_progress' started.")
+                else:
+                    await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+            except httpx.RequestError as e:
+                await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror GDrive: {e}")
+
+            context.user_data.clear()
+            return ConversationHandler.END
+    
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL, 'gdrive': GDRIVE_API_URL}
+    api_url = service_map.get(service)
 
     if not api_url:
-        await query.edit_message_text("Invalid service selected.")
+        await query.edit_message_text("❌ Layanan tidak valid.")
         return ConversationHandler.END
 
-    payload = {"url": url, "user_id": str(user_id)}
-    
     try:
-        response = await async_client.post(f"{api_url}/mirror", json=payload)
+        client = context.bot_data.get('async_client') or httpx.AsyncClient(timeout=30)
+        response = await client.post(f"{api_url}/mirror", json={'url': url}, timeout=15)
         response.raise_for_status()
-        
-        if response.status_code == 200:
-            job = response.json()
-            api_job_id = job.get("job_id")
-            if not api_job_id:
-                await query.edit_message_text("Failed to start mirror: No job ID returned.")
-                return ConversationHandler.END
+        result = response.json()
 
-            job_id = f"{query.from_user.id}_{query.message.message_id}"
+        if result.get('success') and result.get('job_id'):
+            job_id = result['job_id']
             
-            initial_job_state = {
-                "chat_id": query.message.chat_id,
-                "message_id": query.message.message_id,
-                "service": service.title(),
-                "api_job_id": api_job_id,
-                "file_name": file_name,
-                "total_size": file_size,
-                "status": "starting",
-                "progress": 0,
-                "speed": 0,
+            # Create or get the progress message
+            # If user has other active jobs, use the existing message.
+            chat_id = query.message.chat_id
+            
+            if 'active_mirrors' not in context.bot_data:
+                context.bot_data['active_mirrors'] = {}
+
+            existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+            if existing_jobs:
+                message_id = existing_jobs[0]['message_id']
+                await query.message.delete() # delete the selection message
+            else:
+                # This is the first job for this user, edit the current message to be the dashboard
+                username = query.from_user.username or f"ID: {query.from_user.id}"
+                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
+                message_id = query.message.message_id
+
+            # Store job info
+            context.bot_data['active_mirrors'][job_id] = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'file_info': context.user_data['file_info'],
+                'service': service,
+                'username': query.from_user.username or f"ID: {query.from_user.id}"
             }
-            active_jobs[job_id] = initial_job_state
             
-            progress_message = format_job_progress(initial_job_state)
-            await query.edit_message_text(progress_message, parse_mode="Markdown")
-
+            # Mulai poller jika belum berjalan
+            if not context.application.job_queue.get_jobs_by_name('update_progress'):
+                context.application.job_queue.run_repeating(
+                    context.bot_data.get('update_progress_func'), 
+                    interval=POLLING_INTERVAL, 
+                    first=0, 
+                    name='update_progress'
+                )
+                context.application.logger.info("Polling job 'update_progress' started.")
+            
         else:
-            error_message = response.json().get("error", "Unknown error")
-            await query.edit_message_text(f"Failed to start mirror: {error_message}")
+            await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
 
-    except Exception as e:
-        logger.error(f"Error starting mirror for {url} to {service}: {e}")
-        await query.edit_message_text(f"An error occurred: {e}")
+    except httpx.RequestError as e:
+        await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
 
+    context.user_data.clear()
     return ConversationHandler.END
 
 async def cancel_gdrive_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancels the Google Drive login process."""
+    """Membatalkan proses login GDrive."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Google Drive login cancelled.")
+    await query.edit_message_text("Login Google Drive dibatalkan.")
+    context.user_data.clear()
     return ConversationHandler.END
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Stops an active mirroring job."""
-    user_id = update.effective_user.id
-    if user_id not in AUTHORIZED_USER_IDS:
-        await update.message.reply_text("🚫 You are not authorized to use this bot.")
+    """Handles the /STOP_<job_id> command to cancel a mirror job, matching by prefix."""
+    import re
+    
+    message_text = update.message.text
+    # Ekstrak job_id menggunakan regex untuk menangani format /STOP_jobid@botname
+    # Regex diperbarui untuk menyertakan '_' jika job_id mengandungnya.
+    match = re.search(r'^/STOP_([a-zA-Z0-9\-_]+)', message_text)
+    if not match:
+        # Mungkin ini bukan perintah untuk kita, atau formatnya salah.
+        # Kita bisa mengabaikannya atau mengirim pesan bantuan. Untuk saat ini, kita abaikan.
         return
 
-    args = context.args
-    if not args:
-        await update.message.reply_text("Usage: /stop <message_id_of_job>")
+    partial_job_id = match.group(1)
+
+    full_job_id = None
+    if 'active_mirrors' in context.bot_data:
+        for active_id in context.bot_data['active_mirrors']:
+            if active_id.startswith(partial_job_id):
+                full_job_id = active_id
+                break # Found our match
+
+    if not full_job_id:
+        await update.message.reply_text("❌ Job tidak lagi aktif atau sudah selesai.")
+        return
+
+    job_info = context.bot_data['active_mirrors'][full_job_id]
+    service = job_info['service']
+    
+    # Menambahkan GDRIVE_API_URL ke dalam map
+    service_map = {
+        'gofile': GOFILE_API_URL, 
+        'pixeldrain': PIXELDRAIN_API_URL,
+        'gdrive': GDRIVE_API_URL
+    }
+    api_url = service_map.get(service)
+
+    if not api_url:
+        await update.message.reply_text("❌ Layanan untuk job ini tidak dikonfigurasi dengan benar.")
         return
 
     try:
-        target_message_id = int(args[0])
-        job_id_to_stop = f"{user_id}_{target_message_id}"
+        # Use the full_job_id to stop the job
+        # Endpoint untuk semua service adalah /stop
+        endpoint = "stop"
+        client = context.bot_data.get('async_client') or httpx.AsyncClient(timeout=30)
+        response = await client.post(f"{api_url}/{endpoint}/{full_job_id}", timeout=10)
+        response.raise_for_status()
+        result = response.json()
 
-        if job_id_to_stop in active_jobs:
-            job_info = active_jobs[job_id_to_stop]
-            service = job_info["service"].lower()
-            api_job_id = job_info["api_job_id"]
-
-            service_map = {
-                "gofile": GOFILE_API_URL,
-                "pixeldrain": PIXELDRAIN_API_URL,
-                "gdrive": GDRIVE_API_URL,
-            }
-            api_url = service_map.get(service)
-
-            if api_url:
-                response = await async_client.post(f"{api_url}/cancel/{api_job_id}")
-                if response.status_code == 200:
-                    await update.message.reply_text(f"Stopping job with message ID {target_message_id}.")
-                else:
-                    await update.message.reply_text(f"Failed to stop job: {response.text}")
-            else:
-                await update.message.reply_text("Could not determine the API endpoint to stop the job.")
+        if result.get('success'):
+            # Kirim pesan konfirmasi dan simpan ID-nya
+            confirmation_message = await update.message.reply_text("✅ Permintaan pembatalan berhasil dikirim!")
             
-            # The job will be removed from active_jobs by the polling function once status is "cancelled"
+            # Hapus pesan perintah pengguna
+            try:
+                await update.message.delete()
+            except Exception as e:
+                context.application.logger.warning(f"Failed to delete user's stop command message: {e}")
+            
+            # Tandai pekerjaan ini sebagai dibatalkan secara manual dan simpan ID pesan konfirmasi
+            if full_job_id in context.bot_data['active_mirrors']:
+                context.bot_data['active_mirrors'][full_job_id]['manually_cancelled'] = True
+                context.bot_data['active_mirrors'][full_job_id]['confirmation_message_id'] = confirmation_message.message_id
         else:
-            await update.message.reply_text("No active job found for the given message ID.")
-    except ValueError:
-        await update.message.reply_text("Invalid Message ID. It must be a number.")
-    except Exception as e:
-        logger.error(f"Error in /stop command: {e}")
-        await update.message.reply_text(f"An error occurred while trying to stop the job: {e}")
+            await update.message.reply_text(f"⚠️ Gagal membatalkan: {result.get('error', 'Kesalahan tidak diketahui')}")
 
+    except httpx.RequestError as e:
+        context.application.logger.error(f"Error stopping job {full_job_id}: {e}")
+        await update.message.reply_text("❌ Gagal terhubung ke layanan mirror untuk membatalkan.")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancels and ends the conversation."""
+    """Membatalkan alur."""
     query = update.callback_query
     if query:
         await query.answer()
-        await query.edit_message_text("Operation cancelled.")
+        await query.edit_message_text(text="🚫 Permintaan dibatalkan.")
     else:
-        await update.message.reply_text("Operation cancelled.")
+        await update.message.reply_text("🚫 Proses dibatalkan.")
+        
+    context.user_data.clear()
     return ConversationHandler.END

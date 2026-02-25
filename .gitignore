@@ -14,3 +14,8 @@ __pycache__/mirror-to-gofile.cpython-312.pyc
 bot_original_backup.py
 __pycache__/bot.cpython-312.pyc
 bot copy.py
+__pycache__/utils.cpython-312.pyc
+__pycache__/handlers.cpython-312.pyc
+__pycache__/setup.cpython-312.pyc
+__pycache__/poller.cpython-312.pyc
+__pycache__/main.cpython-312.pyc

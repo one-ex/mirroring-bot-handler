@@ -1,46 +1,33 @@
 import os
 import logging
-import asyncio
-import httpx
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-    ConversationHandler,
-    CallbackQueryHandler,
-)
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import PlainTextResponse, JSONResponse
-from starlette.routing import Route
-import uvicorn
-import json
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+# Setup logging
 logger = logging.getLogger(__name__)
 
-# Environment variables
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-GOFILE_API_URL = os.getenv("GOFILE_API_URL")
-PIXELDRAIN_API_URL = os.getenv("PIXELDRAIN_API_URL")
-AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv("AUTHORIZED_USER_IDS", "").split(",") if user_id]
-POLLING_INTERVAL = int(os.getenv("POLLING_INTERVAL", 60))
-DATABASE_URL = os.getenv("DATABASE_URL")
-WEB_AUTH_URL = os.getenv("WEB_AUTH_URL")
-GDRIVE_API_URL = os.getenv("GDRIVE_API_URL")
+# Telegram Bot Configuration
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+if not TELEGRAM_TOKEN:
+    raise ValueError("Tidak ada TELEGRAM_TOKEN ditemukan di environment variables")
 
+# Webhook Configuration
+WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
+if not WEBHOOK_HOST:
+    raise ValueError("Tidak ada RENDER_EXTERNAL_URL ditemukan di environment variables")
 
-# Global initializations
-application = Application.builder().token(TELEGRAM_TOKEN).build()
-async_client = httpx.AsyncClient(timeout=120)
-active_jobs = {}
+# Mirroring Services API URLs
+GOFILE_API_URL = os.getenv('GOFILE_API_URL')
+PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
+GDRIVE_API_URL = os.getenv('GDRIVE_API_URL')
+WEB_AUTH_URL = os.getenv('WEB_AUTH_URL')
 
-# Conversation states
-SELECTING_ACTION, SELECTING_SERVICE = range(2)
+# Database Configuration
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+# User Authorization
+AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
+
+# Polling Configuration
+POLLING_INTERVAL = 2  # Detik
+
+# Conversation States
+URL_HANDLER, SELECT_SERVICE, START_MIRROR, GDRIVE_LOGIN_CANCEL = range(4)
