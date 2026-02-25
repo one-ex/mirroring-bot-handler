@@ -156,6 +156,10 @@ async def get_file_info_from_url(url: str) -> dict:
 async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The global poller task to update all active jobs."""
     bot = context.bot
+
+    # If there are no active mirrors, do nothing.
+    if not context.bot_data.get('active_mirrors'):
+        return
     
     # Fetch status from both services
     all_statuses = {}
