@@ -679,46 +679,51 @@ async def lifespan(app):
     global async_client
     logger.info("Starting application lifespan...")
     
-    # --- PING LAYANAN MIRRORING SAAT STARTUP ---
-    async def ping_services():
-        """Mengirim permintaan GET ke endpoint /health untuk 'membangunkan' layanan."""
-        services_to_ping = {
+    # --- WARMUP LAYANAN MIRRORING SAAT STARTUP ---
+    async def warmup_services():
+        """Mengirim permintaan GET ke endpoint /warmup untuk 'membangunkan' layanan."""
+        services_to_warmup = {
             "GoFile": GOFILE_API_URL,
             "PixelDrain": PIXELDRAIN_API_URL,
             "Google Drive": GDRIVE_API_URL
         }
         
-        ping_tasks = []
-        for service_name, base_url in services_to_ping.items():
+        warmup_tasks = []
+        for service_name, base_url in services_to_warmup.items():
             if base_url:
-                health_url = f"{base_url}/health"
-                ping_tasks.append(async_client.get(health_url, timeout=20))
-                logger.info(f"Pinging {service_name} at {health_url}...")
+                warmup_url = f"{base_url}/warmup"
+                warmup_tasks.append(async_client.get(warmup_url, timeout=60)) # Timeout lebih lama untuk warmup
+                logger.info(f"Warming up {service_name} at {warmup_url}...")
             else:
-                logger.warning(f"URL untuk layanan {service_name} tidak diatur, ping dilewati.")
+                logger.warning(f"URL untuk layanan {service_name} tidak diatur, warmup dilewati.")
 
-        results = await asyncio.gather(*ping_tasks, return_exceptions=True)
+        results = await asyncio.gather(*warmup_tasks, return_exceptions=True)
         
         for i, result in enumerate(results):
-            service_name = list(services_to_ping.keys())[i]
+            # Dapatkan nama layanan dari daftar asli, pastikan urutannya benar
+            service_name = list(services_to_warmup.keys())[i]
             if isinstance(result, httpx.RequestError):
-                logger.warning(f"Ping ke {service_name} gagal (kemungkinan sedang bangun): {result}")
+                logger.warning(f"Warmup untuk {service_name} gagal (kemungkinan sedang bangun atau error): {result}")
             elif isinstance(result, Exception):
-                logger.error(f"Error saat ping ke {service_name}: {result}")
+                logger.error(f"Error saat warmup {service_name}: {result}")
             elif result.status_code == 200:
-                logger.info(f"Ping ke {service_name} berhasil, layanan sudah aktif.")
+                try:
+                    response_json = result.json()
+                    logger.info(f"Warmup untuk {service_name} berhasil: {response_json.get('message', 'Success')}")
+                except Exception as e:
+                    logger.error(f"Gagal mem-parsing respons JSON dari {service_name} saat warmup: {e}")
             else:
-                logger.warning(f"Ping ke {service_name} mengembalikan status {result.status_code}.")
+                logger.warning(f"Warmup untuk {service_name} mengembalikan status {result.status_code}. Respons: {result.text}")
 
     await application.initialize()
     asyncio.create_task(setup_webhook())
     setup_bot()
     await application.start()
     
-    # Jalankan ping setelah bot sepenuhnya dimulai
-    asyncio.create_task(ping_services())
+    # Jalankan warmup setelah bot sepenuhnya dimulai
+    asyncio.create_task(warmup_services())
     
-    logger.info("Application has started and services are being pinged.")
+    logger.info("Application has started and services are being warmed up.")
     yield
     logger.info("Stopping application lifespan...")
     await application.stop()
