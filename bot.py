@@ -692,7 +692,7 @@ async def lifespan(app):
         for service_name, base_url in services_to_warmup.items():
             if base_url:
                 warmup_url = f"{base_url}/warmup"
-                warmup_tasks.append(async_client.get(warmup_url, timeout=60)) # Timeout lebih lama untuk warmup
+                warmup_tasks.append(async_client.post(warmup_url, timeout=60)) # Timeout lebih lama untuk warmup
                 logger.info(f"Warming up {service_name} at {warmup_url}...")
             else:
                 logger.warning(f"URL untuk layanan {service_name} tidak diatur, warmup dilewati.")
