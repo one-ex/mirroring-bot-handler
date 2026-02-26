@@ -1,0 +1,156 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler
+import httpx
+from globals import logger, application, async_client
+from config import (
+    GOFILE_API_URL,
+    PIXELDRAIN_API_URL,
+    GDRIVE_API_URL,
+    WEB_AUTH_URL,
+    POLLING_INTERVAL,
+)
+from utils import check_gdrive_token
+from polling import update_progress
+
+async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Memulai proses mirror setelah layanan dipilih."""
+    query = update.callback_query
+    service = query.data
+    url = context.user_data.get('url')
+    user_id = query.from_user.id
+
+    await query.answer()
+
+    if service == 'gdrive':
+        if not WEB_AUTH_URL:
+            await query.edit_message_text("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel.")
+            return ConversationHandler.END
+
+        has_token = check_gdrive_token(user_id)
+        if not has_token:
+            login_url = f"{WEB_AUTH_URL}/login?user_id={user_id}"
+            keyboard = [
+                [InlineKeyboardButton("🔐 Login via Google", url=login_url)],
+                [InlineKeyboardButton("❌ Batal", callback_data='cancel_gdrive_login')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text="Anda belum login ke Google Drive. Silakan login untuk melanjutkan.",
+                reply_markup=reply_markup
+            )
+            return SELECTING_SERVICE # Tetap di state ini untuk menunggu pembatalan
+        else:
+            # TODO: Implement GDrive mirror start logic
+            await query.edit_message_text("Memulai proses mirror ke Google Drive...")
+            
+            try:
+                response = await async_client.post(
+                    f"{GDRIVE_API_URL}/mirror", 
+                    json={'url': url, 'user_id': str(user_id)}, 
+                    timeout=15
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                if result.get('success') and result.get('job_id'):
+                    job_id = result['job_id']
+                    chat_id = query.message.chat_id
+                    
+                    if 'active_mirrors' not in context.bot_data:
+                        context.bot_data['active_mirrors'] = {}
+
+                    existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+                    if existing_jobs:
+                        message_id = existing_jobs[0]['message_id']
+                        await query.message.delete()
+                    else:
+                        username = query.from_user.username or f"ID: {query.from_user.id}"
+                        await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
+                        message_id = query.message.message_id
+
+                    context.bot_data['active_mirrors'][job_id] = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'file_info': context.user_data['file_info'],
+                        'service': 'gdrive',
+                        'username': query.from_user.username or f"ID: {query.from_user.id}"
+                    }
+                    
+                    # Mulai poller jika belum berjalan
+                    if not application.job_queue.get_jobs_by_name('update_progress'):
+                        application.job_queue.run_repeating(
+                            update_progress, 
+                            interval=POLLING_INTERVAL, 
+                            first=0, 
+                            name='update_progress'
+                        )
+                        logger.info("Polling job 'update_progress' started.")
+                else:
+                    await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+            except httpx.RequestError as e:
+                await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror GDrive: {e}")
+
+            context.user_data.clear()
+            return ConversationHandler.END
+    
+    service_map = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL, 'gdrive': GDRIVE_API_URL}
+    api_url = service_map.get(service)
+
+    if not api_url:
+        await query.edit_message_text("❌ Layanan tidak valid.")
+        return ConversationHandler.END
+
+    try:
+        response = await async_client.post(f"{api_url}/mirror", json={'url': url}, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success') and result.get('job_id'):
+            job_id = result['job_id']
+            
+            # Create or get the progress message
+            # If user has other active jobs, use the existing message.
+            chat_id = query.message.chat_id
+            progress_message = None
+            
+            if 'active_mirrors' not in context.bot_data:
+                context.bot_data['active_mirrors'] = {}
+
+            existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+            if existing_jobs:
+                message_id = existing_jobs[0]['message_id']
+                await query.message.delete() # delete the selection message
+            else:
+                # This is the first job for this user, edit the current message to be the dashboard
+                username = query.from_user.username or f"ID: {query.from_user.id}"
+                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
+                message_id = query.message.message_id
+
+            # Store job info
+            context.bot_data['active_mirrors'][job_id] = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'file_info': context.user_data['file_info'],
+                'service': service,
+                'username': query.from_user.username or f"ID: {query.from_user.id}"
+            }
+            
+            # Mulai poller jika belum berjalan
+            if not application.job_queue.get_jobs_by_name('update_progress'):
+                application.job_queue.run_repeating(
+                    update_progress, 
+                    interval=POLLING_INTERVAL, 
+                    first=0, 
+                    name='update_progress'
+                )
+                logger.info("Polling job 'update_progress' started.")
+            
+        else:
+            await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
+
+    except httpx.RequestError as e:
+        await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
+
+    context.user_data.clear()
+    return ConversationHandler.END
