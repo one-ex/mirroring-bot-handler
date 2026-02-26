@@ -1,7 +1,7 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 from globals import logger, application
-from config import AUTHORIZED_USERS, ADMIN_USERS
+from config import AUTHORIZED_USER_IDS
 from utils import get_file_info_from_url
 from start_mirror import start_mirror
 
