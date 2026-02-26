@@ -93,6 +93,10 @@ async def main():
     
     logger.info(f"Bot started on port {port}")
     
+    # Start poller
+    from poller import start_poller
+    poller_task = start_poller(application)
+    
     # Start Starlette app
     import uvicorn
     config = uvicorn.Config(
@@ -109,6 +113,13 @@ async def main():
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
+        # Cancel poller task
+        poller_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
+        
         await application.stop()
         await application.shutdown()
         # Close async_client

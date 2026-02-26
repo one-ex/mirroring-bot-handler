@@ -5,7 +5,6 @@ import uuid
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from config import POLLING_INTERVAL
 from services.mirroring_service import MirroringService
 
 logger = logging.getLogger(__name__)
@@ -82,13 +81,5 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     )
     
     await query.edit_message_text(initial_text)
-    
-    # Start poller if not already running
-    if 'poller_task' not in context.bot_data:
-        from poller import start_poller
-        context.bot_data['poller_task'] = asyncio.create_task(
-            start_poller(context.application, POLLING_INTERVAL)
-        )
-        logger.info("Poller started")
     
     return -1
