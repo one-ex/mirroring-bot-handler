@@ -716,80 +716,46 @@ async def lifespan(app):
     
     # --- WARMUP LAYANAN MIRRORING SAAT STARTUP ---
     async def warmup_services():
-        """Mengirim permintaan untuk 'membangunkan' layanan dengan mekanisme retry."""
+        """Mengirim permintaan GET ke endpoint /warmup untuk 'membangunkan' layanan."""
         services_to_warmup = {
-            "GoFile": {"url": GOFILE_API_URL, "method": "POST"},
-            "PixelDrain": {"url": PIXELDRAIN_API_URL, "method": "POST"},
-            "Google Drive": {"url": GDRIVE_API_URL, "method": "POST"},
-            "Web Auth Helper": {"url": WEB_AUTH_URL, "method": "POST"} # Ubah ke POST
+            "GoFile": GOFILE_API_URL,
+            "PixelDrain": PIXELDRAIN_API_URL,
+            "Google Drive": GDRIVE_API_URL,
+            "Web Auth Helper": WEB_AUTH_URL
         }
         
-        max_retries = 10
-        retry_delay = 10  # detik
-
-        for service_name, config in services_to_warmup.items():
-            base_url = config["url"]
-            method = config["method"]
-            
-            if not base_url:
+        warmup_tasks = []
+        for service_name, base_url in services_to_warmup.items():
+            if base_url:
+                if service_name == "Web Auth Helper":
+                    # Cukup akses URL root untuk warmup Web Auth Helper
+                    warmup_tasks.append(async_client.get(base_url, timeout=60))
+                    logger.info(f"Warming up {service_name} at {base_url}...")
+                else:
+                    # Untuk layanan lain, gunakan endpoint /warmup
+                    warmup_url = f"{base_url}/warmup"
+                    warmup_tasks.append(async_client.post(warmup_url, timeout=60))
+                    logger.info(f"Warming up {service_name} at {warmup_url}...")
+            else:
                 logger.warning(f"URL untuk layanan {service_name} tidak diatur, warmup dilewati.")
-                continue
 
-            for attempt in range(max_retries):
+        results = await asyncio.gather(*warmup_tasks, return_exceptions=True)
+        
+        for i, result in enumerate(results):
+            # Dapatkan nama layanan dari daftar asli, pastikan urutannya benar
+            service_name = list(services_to_warmup.keys())[i]
+            if isinstance(result, httpx.RequestError):
+                logger.warning(f"Warmup untuk {service_name} gagal (kemungkinan sedang bangun atau error): {result}")
+            elif isinstance(result, Exception):
+                logger.error(f"Error saat warmup {service_name}: {result}")
+            elif result.status_code == 200:
                 try:
-                    if method == "GET":
-                        # Untuk Web Auth Helper, samarkan sebagai browser lengkap untuk memicu wakeup di Render
-                        headers = {
-                            "Connection": "keep-alive",
-                            "Upgrade-Insecure-Requests": "1",
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-                            "Accept-Language": "en-US,en;q=0.9",
-                        }
-                        logger.info(f"Warming up {service_name} at {base_url} (Attempt {attempt + 1}/{max_retries})...")
-                        response = await async_client.get(base_url, timeout=60, headers=headers)
-                    else: # POST
-                        # Untuk layanan lain, gunakan endpoint /warmup
-                        warmup_url = f"{base_url}/warmup"
-                        logger.info(f"Warming up {service_name} at {warmup_url} (Attempt {attempt + 1}/{max_retries})...")
-                        response = await async_client.post(warmup_url, timeout=60)
-
-                    # Periksa apakah respons sukses (2xx)
-                    response.raise_for_status()
-                    
-                    try:
-                        response_json = response.json()
-                        logger.info(f"Warmup untuk {service_name} berhasil: {response_json.get('message', 'Success')}")
-                    except Exception:
-                        # Jika respons bukan JSON (seperti "Web Auth Helper is running!"), anggap sukses
-                        logger.info(f"Warmup untuk {service_name} berhasil dengan status {response.status_code}.")
-                    
-                    break  # Jika berhasil, keluar dari loop retry
-
-                except httpx.HTTPStatusError as e:
-                    # Khusus untuk Web Auth Helper, 405 adalah SUKSES karena artinya aplikasi sudah bangun
-                    if service_name == "Web Auth Helper" and e.response.status_code == 405:
-                        logger.info(f"Warmup untuk {service_name} berhasil (menerima status 405 Method Not Allowed, menandakan layanan aktif).")
-                        break # Dianggap sukses
-
-                    # Gagal karena status error HTTP lain (4xx, 5xx)
-                    if e.response.status_code >= 500 and attempt < max_retries - 1:
-                        logger.warning(f"Warmup untuk {service_name} gagal dengan status {e.response.status_code}. Mencoba lagi dalam {retry_delay} detik...")
-                        await asyncio.sleep(retry_delay)
-                    else:
-                        logger.error(f"Warmup untuk {service_name} gagal permanen setelah {max_retries} percobaan: {e}")
-                        break # Gagal permanen
-                except httpx.RequestError as e:
-                    # Gagal karena masalah jaringan atau koneksi
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Warmup untuk {service_name} gagal (masalah koneksi): {e}. Mencoba lagi dalam {retry_delay} detik...")
-                        await asyncio.sleep(retry_delay)
-                    else:
-                        logger.error(f"Warmup untuk {service_name} gagal permanen setelah {max_retries} percobaan: {e}")
-                        break # Gagal permanen
+                    response_json = result.json()
+                    logger.info(f"Warmup untuk {service_name} berhasil: {response_json.get('message', 'Success')}")
                 except Exception as e:
-                    logger.error(f"Terjadi kesalahan tak terduga saat warmup {service_name}: {e}")
-                    break # Keluar jika ada error lain
+                    logger.error(f"Gagal mem-parsing respons JSON dari {service_name} saat warmup: {e}")
+            else:
+                logger.warning(f"Warmup untuk {service_name} mengembalikan status {result.status_code}. Respons: {result.text}")
 
     await application.initialize()
     asyncio.create_task(setup_webhook())
