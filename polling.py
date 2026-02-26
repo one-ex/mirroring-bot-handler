@@ -4,9 +4,9 @@ import httpx
 from telegram import InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from app.globals import application, async_client, logger
-from app.config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
-from app.handlers.helpers import format_job_progress
+from globals import application, async_client, logger
+from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
+from handlers import format_job_progress
 
 
 async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
