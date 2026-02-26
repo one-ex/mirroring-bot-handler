@@ -721,7 +721,7 @@ async def lifespan(app):
             "GoFile": {"url": GOFILE_API_URL, "method": "POST"},
             "PixelDrain": {"url": PIXELDRAIN_API_URL, "method": "POST"},
             "Google Drive": {"url": GDRIVE_API_URL, "method": "POST"},
-            "Web Auth Helper": {"url": WEB_AUTH_URL, "method": "GET"}
+            "Web Auth Helper": {"url": WEB_AUTH_URL, "method": "POST"} # Ubah ke POST
         }
         
         max_retries = 10
@@ -767,7 +767,12 @@ async def lifespan(app):
                     break  # Jika berhasil, keluar dari loop retry
 
                 except httpx.HTTPStatusError as e:
-                    # Gagal karena status error HTTP (4xx, 5xx)
+                    # Khusus untuk Web Auth Helper, 405 adalah SUKSES karena artinya aplikasi sudah bangun
+                    if service_name == "Web Auth Helper" and e.response.status_code == 405:
+                        logger.info(f"Warmup untuk {service_name} berhasil (menerima status 405 Method Not Allowed, menandakan layanan aktif).")
+                        break # Dianggap sukses
+
+                    # Gagal karena status error HTTP lain (4xx, 5xx)
                     if e.response.status_code >= 500 and attempt < max_retries - 1:
                         logger.warning(f"Warmup untuk {service_name} gagal dengan status {e.response.status_code}. Mencoba lagi dalam {retry_delay} detik...")
                         await asyncio.sleep(retry_delay)
