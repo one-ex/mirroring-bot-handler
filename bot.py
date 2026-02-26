@@ -724,8 +724,8 @@ async def lifespan(app):
             "Web Auth Helper": {"url": WEB_AUTH_URL, "method": "GET"}
         }
         
-        max_retries = 5
-        retry_delay = 5  # detik
+        max_retries = 10
+        retry_delay = 10  # detik
 
         for service_name, config in services_to_warmup.items():
             base_url = config["url"]
@@ -738,9 +738,12 @@ async def lifespan(app):
             for attempt in range(max_retries):
                 try:
                     if method == "GET":
-                        # Untuk Web Auth Helper, cukup akses URL root
+                        # Untuk Web Auth Helper, samarkan sebagai browser untuk memicu wakeup di Render
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                        }
                         logger.info(f"Warming up {service_name} at {base_url} (Attempt {attempt + 1}/{max_retries})...")
-                        response = await async_client.get(base_url, timeout=60)
+                        response = await async_client.get(base_url, timeout=60, headers=headers)
                     else: # POST
                         # Untuk layanan lain, gunakan endpoint /warmup
                         warmup_url = f"{base_url}/warmup"
