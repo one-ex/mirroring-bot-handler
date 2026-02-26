@@ -722,7 +722,7 @@ async def trigger_github_warmup(url: str):
         "Authorization": f"token {GITHUB_PAT}",
     }
     data = {
-        "ref": "main",  # atau branch default Anda
+        "ref": "master",  # Menggunakan 'master' karena lebih umum untuk repositori lama
         "inputs": {"url": url}
     }
     
