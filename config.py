@@ -15,6 +15,7 @@ WEBHOOK_HOST = os.getenv('RENDER_EXTERNAL_URL')
 if not WEBHOOK_HOST:
     raise ValueError("Tidak ada RENDER_EXTERNAL_URL ditemukan di environment variables")
 
+
 # ID Telegram Super User
 AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
 

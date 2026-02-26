@@ -4,7 +4,7 @@ from telegram import Update
 from contextlib import asynccontextmanager
 
 from globals import application, logger
-from config import WEB_AUTH_URL, ENVIRONMENT
+from config import WEB_AUTH_URL
 from lifespan import lifespan
 from handlers import (
     start_command,
@@ -74,12 +74,8 @@ def main() -> None:
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.COMMAND, stop_mirror_command_handler))
 
-    if ENVIRONMENT == "development":
-        logger.info("Starting bot in polling mode for development...")
-        application.run_polling()
-    else:
-        logger.info("Starting bot in webhook mode for production...")
-        uvicorn.run(app, host="0.0.0.0", port=10000)
+    logger.info("Starting bot in webhook mode...")
+    uvicorn.run(app, host="0.0.0.0", port=10000)
 
 if __name__ == "__main__":
     main()
