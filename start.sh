@@ -1,11 +1,15 @@
 #!/bin/bash
 
-# Script untuk menjalankan aplikasi di Render
+# Exit on error
+set -e
 
-# Gunakan PORT dari environment variable Render
-PORT=${PORT:-10000}
+# Load environment variables
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
 
-echo "Starting application on port $PORT"
+# Install dependencies
+pip install -r requirements.txt
 
-# Jalankan dengan gunicorn dan uvicorn worker
-gunicorn -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 60 bot:app
+# Run the application
+uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8000}

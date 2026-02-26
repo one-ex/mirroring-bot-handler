@@ -6,7 +6,7 @@ services:
     startCommand: "./start.sh"
     envVars:
       - key: PORT
-        value: 10000
+        value: 8000
       - key: PYTHON_VERSION
         value: 3.11.0
 
