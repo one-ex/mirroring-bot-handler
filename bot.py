@@ -729,8 +729,10 @@ async def lifespan(app):
             if base_url:
                 if service_name == "Web Auth Helper":
                     # Cukup akses URL root untuk warmup Web Auth Helper
-                    warmup_tasks.append(async_client.get(base_url, timeout=60))
-                    logger.info(f"Warming up {service_name} at {base_url}...")
+
+                    warmup_url = f"{base_url}/callback"
+                    warmup_tasks.append(async_client.get(warmup_url, timeout=60))
+                    logger.info(f"Warming up {service_name} at {warmup_url}...")
                 else:
                     # Untuk layanan lain, gunakan endpoint /warmup
                     warmup_url = f"{base_url}/warmup"
