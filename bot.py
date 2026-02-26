@@ -33,6 +33,8 @@ POLLING_INTERVAL = 2  # Detik
 DATABASE_URL = os.getenv('DATABASE_URL')
 WEB_AUTH_URL = os.getenv('WEB_AUTH_URL')
 GDRIVE_API_URL = os.getenv('GDRIVE_API_URL')
+GITHUB_PAT = os.getenv('GITHUB_PAT')
+GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
 # --- Inisialisasi Global ---
 application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -708,6 +710,33 @@ async def health_check(request: Request):
     """Endpoint untuk memeriksa status bot."""
     return JSONResponse({"status": "ok"})
 
+async def trigger_github_warmup(url: str):
+    """Memicu GitHub Action untuk melakukan warmup pada URL yang diberikan."""
+    if not GITHUB_PAT or not GITHUB_REPOSITORY:
+        logger.warning("GITHUB_PAT atau GITHUB_REPOSITORY tidak diatur. Warmup via GitHub dilewati.")
+        return
+
+    api_url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/actions/workflows/warmup.yml/dispatches"
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {GITHUB_PAT}",
+    }
+    data = {
+        "ref": "main",  # atau branch default Anda
+        "inputs": {"url": url}
+    }
+    
+    logger.info(f"Memicu GitHub Action untuk warmup: {url}")
+    try:
+        response = await async_client.post(api_url, headers=headers, json=data, timeout=30)
+        if response.status_code == 204:
+            logger.info(f"Berhasil memicu GitHub Action untuk warmup {url}.")
+        else:
+            logger.error(f"Gagal memicu GitHub Action. Status: {response.status_code}, Respons: {response.text}")
+    except Exception as e:
+        logger.error(f"Error saat memicu GitHub Action: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app):
     """Lifespan manager for the application."""
@@ -716,7 +745,7 @@ async def lifespan(app):
     
     # --- WARMUP LAYANAN MIRRORING SAAT STARTUP ---
     async def warmup_services():
-        """Mengirim permintaan GET ke endpoint /warmup untuk 'membangunkan' layanan."""
+        """Mengirim permintaan untuk 'membangunkan' layanan."""
         services_to_warmup = {
             "GoFile": GOFILE_API_URL,
             "PixelDrain": PIXELDRAIN_API_URL,
@@ -728,9 +757,8 @@ async def lifespan(app):
         for service_name, base_url in services_to_warmup.items():
             if base_url:
                 if service_name == "Web Auth Helper":
-                    # Cukup akses URL root untuk warmup Web Auth Helper
-                    warmup_tasks.append(async_client.get(base_url, timeout=60))
-                    logger.info(f"Warming up {service_name} at {base_url}...")
+                    # Gunakan GitHub Actions untuk warmup Web Auth Helper
+                    warmup_tasks.append(trigger_github_warmup(base_url))
                 else:
                     # Untuk layanan lain, gunakan endpoint /warmup
                     warmup_url = f"{base_url}/warmup"

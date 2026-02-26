@@ -1,0 +1,16 @@
+name: Manual Warmup Trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'The URL to warm up'
+        required: true
+        default: 'https://example.com'
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send curl request
+        run: curl -s -o /dev/null -w "%{http_code}" "${{ github.event.inputs.url }}"
