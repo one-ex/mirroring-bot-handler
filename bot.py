@@ -738,9 +738,13 @@ async def lifespan(app):
             for attempt in range(max_retries):
                 try:
                     if method == "GET":
-                        # Untuk Web Auth Helper, samarkan sebagai browser untuk memicu wakeup di Render
+                        # Untuk Web Auth Helper, samarkan sebagai browser lengkap untuk memicu wakeup di Render
                         headers = {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                            "Connection": "keep-alive",
+                            "Upgrade-Insecure-Requests": "1",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.9",
                         }
                         logger.info(f"Warming up {service_name} at {base_url} (Attempt {attempt + 1}/{max_retries})...")
                         response = await async_client.get(base_url, timeout=60, headers=headers)
