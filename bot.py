@@ -720,16 +720,22 @@ async def lifespan(app):
         services_to_warmup = {
             "GoFile": GOFILE_API_URL,
             "PixelDrain": PIXELDRAIN_API_URL,
-            "Google Drive": GDRIVE_API_URL
+            "Google Drive": GDRIVE_API_URL,
+            "Web Auth Helper": WEB_AUTH_URL
         }
         
         warmup_tasks = []
         for service_name, base_url in services_to_warmup.items():
             if base_url:
-                # Untuk layanan lain, gunakan endpoint /warmup
-                warmup_url = f"{base_url}/warmup"
-                warmup_tasks.append(async_client.post(warmup_url, timeout=60))
-                logger.info(f"Warming up {service_name} at {warmup_url}...")
+                if service_name == "Web Auth Helper":
+                    # Cukup akses URL root untuk warmup Web Auth Helper
+                    warmup_tasks.append(async_client.get(base_url, timeout=60))
+                    logger.info(f"Warming up {service_name} at {base_url}...")
+                else:
+                    # Untuk layanan lain, gunakan endpoint /warmup
+                    warmup_url = f"{base_url}/warmup"
+                    warmup_tasks.append(async_client.post(warmup_url, timeout=60))
+                    logger.info(f"Warming up {service_name} at {warmup_url}...")
             else:
                 logger.warning(f"URL untuk layanan {service_name} tidak diatur, warmup dilewati.")
 
