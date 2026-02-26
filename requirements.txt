@@ -1,7 +1,8 @@
 python-telegram-bot[job-queue]
-httpx
-starlette
-uvicorn[standard]
-psycopg2
-python-dotenv
+requests
 gunicorn
+uvicorn
+asgiref
+starlette
+httpx
+psycopg2-binary
