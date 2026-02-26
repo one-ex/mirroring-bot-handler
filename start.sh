@@ -12,4 +12,4 @@ fi
 pip install -r requirements.txt
 
 # Run the application
-uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8000}
+python main.py

@@ -33,6 +33,11 @@ def setup_bot() -> Application:
     # Initialize bot_data
     application.bot_data['jobs'] = {}
     
+    # Initialize async_client
+    import httpx
+    async_client = httpx.AsyncClient(timeout=30)
+    application.bot_data['async_client'] = async_client
+    
     # Setup conversation handler
     conv_handler = ConversationHandler(
         entry_points=[
@@ -88,17 +93,27 @@ async def main():
     
     logger.info(f"Bot started on port {port}")
     
-    # Keep the application running
+    # Start Starlette app
+    import uvicorn
+    config = uvicorn.Config(
+        app=app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
+    server = uvicorn.Server(config)
+    
+    # Keep both applications running
     try:
-        # Note: The Starlette app will be started separately by uvicorn
-        # We just need to keep the bot application running
-        while True:
-            await asyncio.sleep(3600)  # Sleep for 1 hour
+        await server.serve()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
         await application.stop()
         await application.shutdown()
+        # Close async_client
+        if 'async_client' in application.bot_data:
+            await application.bot_data['async_client'].aclose()
 
 
 if __name__ == '__main__':

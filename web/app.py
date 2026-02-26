@@ -76,10 +76,11 @@ async def lifespan(app: Starlette):
     # Get application from app state
     application = app.state.application
     
-    # Create async client
-    import httpx
-    async_client = httpx.AsyncClient()
-    application.bot_data['async_client'] = async_client
+    # Get async client from bot_data
+    async_client = application.bot_data.get('async_client')
+    if not async_client:
+        logger.error("async_client not found in bot_data")
+        raise RuntimeError("async_client not initialized")
     
     # Warm up services
     await warmup_services(async_client)
@@ -91,7 +92,7 @@ async def lifespan(app: Starlette):
     
     # Shutdown
     logger.info("Shutting down...")
-    await async_client.aclose()
+    # async_client will be closed in main.py
 
 
 # Create Starlette application
