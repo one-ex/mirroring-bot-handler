@@ -4,7 +4,10 @@
 
 # 1. Lakukan warmup pada Web Auth Helper terlebih dahulu
 echo "Warming up Web Auth Helper..."
-curl -X GET https://web-auth-helper.onrender.com
+curl --request POST \
+  --url https://api.render.com/v1/services/srv-d6dkh4ffte5s73dfcah0/restart \
+  --header 'Accept: application/json' \
+  --header 'Authorization: Bearer rnd_UiLEGAuu3ZeFgyqdaJZDuSzSwnss'
 echo "Warmup command sent."
 
 # 2. Gunakan PORT dari environment variable Render
