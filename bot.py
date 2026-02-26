@@ -776,14 +776,17 @@ async def lifespan(app):
                 logger.warning(f"Warmup untuk {service_name} gagal (kemungkinan sedang bangun atau error): {result}")
             elif isinstance(result, Exception):
                 logger.error(f"Error saat warmup {service_name}: {result}")
-            elif result.status_code == 200:
+            # Tambahkan pengecekan untuk memastikan 'result' tidak None sebelum mengakses atributnya
+            elif result and result.status_code == 200:
                 try:
                     response_json = result.json()
                     logger.info(f"Warmup untuk {service_name} berhasil: {response_json.get('message', 'Success')}")
                 except Exception as e:
                     logger.error(f"Gagal mem-parsing respons JSON dari {service_name} saat warmup: {e}")
-            else:
+            # Tambahkan pengecekan untuk memastikan 'result' tidak None
+            elif result:
                 logger.warning(f"Warmup untuk {service_name} mengembalikan status {result.status_code}. Respons: {result.text}")
+            # Jika result adalah None (kasus Web Auth Helper), tidak melakukan apa-apa karena logging sudah ditangani secara internal.
 
     await application.initialize()
     asyncio.create_task(setup_webhook())
