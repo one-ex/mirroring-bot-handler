@@ -1,60 +1,78 @@
-import uvicorn
-from fastapi import FastAPI, Request
-from telegram import Update
+import os
+import logging
+import psycopg2
+import re
+import httpx
+import asyncio
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, JSONResponse
+from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
-from globals import application, logger
-from config import WEB_AUTH_URL
-from lifespan import lifespan
+# Import konfigurasi dari config.py
+from config import (
+    TELEGRAM_TOKEN,
+    GOFILE_API_URL,
+    PIXELDRAIN_API_URL,
+    GDRIVE_API_URL,
+    DATABASE_URL,
+    WEB_AUTH_URL,
+    WEBHOOK_HOST,
+    AUTHORIZED_USER_IDS,
+    GITHUB_PAT,
+    GITHUB_REPOSITORY,
+    POLLING_INTERVAL,
+    SELECTING_ACTION,
+    SELECTING_SERVICE
+)
+
+# Import fungsi-fungsi handler dari handlers.py
 from handlers import (
-    start_command,
+    start,
     url_handler,
     select_service,
     cancel,
     cancel_gdrive_login,
-    stop_mirror_command_handler,
+    stop_mirror_command_handler
 )
+
+# Import fungsi start_mirror dari start_mirror.py
 from start_mirror import start_mirror
-from telegram.ext import (
-    CommandHandler,
-    MessageHandler,
-    filters,
-    CallbackQueryHandler,
-    ConversationHandler,
+
+# Import fungsi update_progress dari polling.py
+from polling import update_progress
+
+# Import fungsi-fungsi utilitas dari utils.py
+from utils import (
+    get_file_info_from_url,
+    format_bytes,
+    format_job_progress,
+    check_gdrive_token
 )
 
-# Conversation states
-SELECTING_ACTION, SELECTING_SERVICE = range(2)
+# Import fungsi lifespan dari lifespan.py
+from lifespan import lifespan, trigger_github_warmup
 
-@asynccontextmanager
-async def app_lifespan(app: FastAPI):
-    logger.info("Initializing bot and setting webhook...")
-    await application.initialize()
-    await application.start()
-    await application.bot.set_webhook(
-        url=f"{WEB_AUTH_URL}/telegram",
-        allowed_updates=["message", "callback_query"],
-    )
-    async with lifespan(app) as state:
-        yield state
-    logger.info("Shutting down bot...")
-    await application.stop()
+# Logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(lifespan=app_lifespan)
+# --- Inisialisasi Global ---
+application = Application.builder().token(TELEGRAM_TOKEN).build()
+async_client = httpx.AsyncClient(timeout=30)
 
-@app.post("/telegram")
-async def telegram_webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
-    return {"status": "ok"}
+def setup_bot():
+    """Mengatur semua handler dan job queue untuk bot."""
+    # Initialize bot_data dan JobQueue
+    application.bot_data['active_mirrors'] = {}
+    job_queue = application.job_queue
+    job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=0)
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
-def main() -> None:
-    """Start the bot."""
+    # Daftarkan semua handler
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, url_handler)],
         states={
@@ -64,18 +82,62 @@ def main() -> None:
             ],
             SELECTING_SERVICE: [
                 CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain|gdrive)$'),
-                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login$'),
+                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login$')
             ],
         },
-        fallbacks=[CallbackQueryHandler(cancel, pattern='^cancel$')],
+        fallbacks=[CommandHandler('cancel', cancel)],
+        conversation_timeout=300  # 5 menit
     )
-
-    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("stop", stop_mirror_command_handler))
+    application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/STOP_'), stop_mirror_command_handler))
+    logger.info("Bot handlers and job queue have been set up.")
 
-    logger.info("Starting bot in webhook mode...")
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+async def setup_webhook():
+    """Menginisialisasi aplikasi dan mengatur webhook."""
+    try:
+        # Pastikan host tidak memiliki skema http/https untuk menghindari duplikasi
+        clean_host = WEBHOOK_HOST.replace("https://", "").replace("http://", "")
+        url = f"https://{clean_host}/webhook"
+        
+        if await application.bot.set_webhook(url):
+            logger.info(f"Webhook has been set to `{url}`")
+        else:
+            logger.error(f"Failed to set webhook to `{url}`")
+    except Exception as e:
+        logger.error(f"Error during webhook setup: {e}")
 
+# --- Konfigurasi dan Jalankan Aplikasi ---
+
+async def webhook(request: Request):
+    """Endpoint webhook untuk menerima pembaruan dari Telegram."""
+    try:
+        update_data = await request.json()
+        update = Update.de_json(update_data, application.bot)
+        await application.process_update(update)
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return JSONResponse({"status": "error"}, status_code=500)
+
+async def health_check(request: Request):
+    """Endpoint untuk memeriksa status bot."""
+    return JSONResponse({"status": "ok"})
+
+# Definisikan rute dan aplikasi Starlette
+routes = [
+    Route('/health', health_check, methods=['GET']),
+    Route('/webhook', webhook, methods=['POST'])
+]
+app = Starlette(routes=routes, lifespan=lifespan)
+
+# Konfigurasi untuk deployment
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    
+    # Render akan mengatur PORT environment variable
+    port = int(os.environ.get("PORT", 10000))
+    host = "0.0.0.0"
+    
+    print(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

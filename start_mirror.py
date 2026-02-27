@@ -1,19 +1,17 @@
+import httpx
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-import httpx
-from globals import logger, application, async_client
-from config import (
-    GOFILE_API_URL,
-    PIXELDRAIN_API_URL,
-    GDRIVE_API_URL,
-    WEB_AUTH_URL,
-    POLLING_INTERVAL,
-)
+
+from config import WEB_AUTH_URL, GDRIVE_API_URL, GOFILE_API_URL, PIXELDRAIN_API_URL, POLLING_INTERVAL, SELECTING_SERVICE
 from utils import check_gdrive_token
 from polling import update_progress
 
+logger = logging.getLogger(__name__)
+
 async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai proses mirror setelah layanan dipilih."""
+    from bot import async_client, application
     query = update.callback_query
     service = query.data
     url = context.user_data.get('url')

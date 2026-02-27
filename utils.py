@@ -1,13 +1,23 @@
 import os
 import re
-import httpx
+import logging
 import psycopg2
 from urllib.parse import urlparse
-from globals import logger, async_client
+
+# Import async_client dari bot.py untuk menghindari circular import
+# async_client akan diimpor secara langsung di fungsi yang membutuhkan
+# atau kita bisa mengimpor dari config jika perlu
+
+logger = logging.getLogger(__name__)
+
+# Import variabel konfigurasi yang diperlukan
 from config import DATABASE_URL
 
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
+    # Import async_client di dalam fungsi untuk menghindari circular import
+    from bot import async_client
+    
     try:
         async with async_client.stream("GET", url, follow_redirects=True, timeout=15) as r:
             r.raise_for_status()
@@ -18,7 +28,7 @@ async def get_file_info_from_url(url: str) -> dict:
                 matches = re.findall('filename="?([^"]+)"?', d)
                 if matches:
                     filename = matches[0]
-            if filename == "N/A":
+            if filename == "N/A": 
                 parsed_url = urlparse(str(r.url))
                 filename = os.path.basename(parsed_url.path) or "downloaded_file"
             return {"success": True, "filename": filename, "size": size, "formatted_size": format_bytes(size)}

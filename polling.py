@@ -1,16 +1,17 @@
 import asyncio
 import httpx
-
-from telegram import InlineKeyboardMarkup
+import logging
 from telegram.ext import ContextTypes
+from telegram import InlineKeyboardMarkup
 
-from globals import application, async_client, logger
 from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
 from utils import format_job_progress
 
+logger = logging.getLogger(__name__)
 
 async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     """The global poller task to update all active jobs."""
+    from bot import async_client, application
     bot = context.bot
     
     # Fetch status from both services

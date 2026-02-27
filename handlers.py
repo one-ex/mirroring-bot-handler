@@ -1,11 +1,15 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import re
+import httpx
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from telegram.ext import ContextTypes, ConversationHandler
-from globals import logger, application
-from config import AUTHORIZED_USER_IDS
-from utils import get_file_info_from_url
-from start_mirror import start_mirror
 
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+from config import AUTHORIZED_USER_IDS, SELECTING_ACTION, SELECTING_SERVICE, GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
+from utils import get_file_info_from_url
+
+logger = logging.getLogger(__name__)
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler untuk perintah /start"""
     user = update.effective_user
     chat = update.effective_chat
@@ -98,8 +102,6 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     return SELECTING_SERVICE
 
-
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
     query = update.callback_query
@@ -122,6 +124,7 @@ async def cancel_gdrive_login(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def stop_mirror_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles the /STOP_<job_id> command to cancel a mirror job, matching by prefix."""
+    from bot import async_client
     message_text = update.message.text
     # Ekstrak job_id menggunakan regex untuk menangani format /STOP_jobid@botname
     # Regex diperbarui untuk menyertakan '_' jika job_id mengandungnya.

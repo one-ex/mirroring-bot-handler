@@ -2,22 +2,10 @@ mirror-test.py
 venv/
 test_mirror.sh
 test_mirror_fixed.sh
-__pycache__/app.cpython-312.pyc
-src/__pycache__/__init__.cpython-312.pyc
-src/callback/__pycache__/__init__.cpython-312.pyc
-src/telegram/__pycache__/bot.cpython-312.pyc
-src/telegram/__pycache__/handlers.cpython-312.pyc
-src/telegram/__pycache__/__init__.cpython-312.pyc
-src/callback/__pycache__/handler.cpython-312.pyc
-__pycache__/config.cpython-312.pyc
-__pycache__/mirror-to-gofile.cpython-312.pyc
+__pycache__/*
+src/*
 bot_original_backup.py
-__pycache__/bot.cpython-312.pyc
 bot copy.py
-__pycache__/utils.cpython-312.pyc
-__pycache__/handlers.cpython-312.pyc
-__pycache__/setup.cpython-312.pyc
-__pycache__/poller.cpython-312.pyc
-__pycache__/main.cpython-312.pyc
 .env
-__pycache__/globals.cpython-312.pyc
+bot_base.py
+bot_backup.py
