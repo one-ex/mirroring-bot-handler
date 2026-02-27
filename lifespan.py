@@ -57,7 +57,7 @@ async def lifespan(app):
                     # Coba akses langsung URL Web Auth Helper terlebih dahulu
                     try:
                         # Gunakan endpoint /warmup jika tersedia, jika tidak coba akses root
-                        warmup_url = f"{base_url}/warmup"
+                        warmup_url = f"{base_url}"
                         direct_response = await async_client.get(warmup_url, timeout=30)
                         if direct_response.status_code == 200:
                             logger.info(f"Web Auth Helper langsung dapat diakses di {warmup_url}. Warmup via GitHub dilewati.")
