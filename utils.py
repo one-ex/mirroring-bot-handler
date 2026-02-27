@@ -3,6 +3,7 @@ import re
 import logging
 import psycopg2
 from urllib.parse import urlparse
+from telegram import InlineKeyboardButton
 
 # Import async_client dari bot.py untuk menghindari circular import
 # async_client akan diimpor secara langsung di fungsi yang membutuhkan
@@ -69,9 +70,11 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
+        keyboard = []
         if download_url:
-            text += f"🔗 **Link:** `{download_url}`"
-        return {"text": text, "keyboard": []}
+            # Tambahkan inline keyboard dengan tombol untuk membuka link
+            keyboard = [[InlineKeyboardButton("🌐 Open Link", url=download_url)]]
+        return {"text": text, "keyboard": keyboard}
 
     if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
         text = (

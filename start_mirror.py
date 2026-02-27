@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Memulai proses mirror setelah layanan dipilih."""
     from bot import async_client, application
+    bot = context.bot
     query = update.callback_query
     service = query.data
     url = context.user_data.get('url')
@@ -59,12 +60,28 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
                     existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
                     if existing_jobs:
+                        # Gunakan message_id yang sama (dashboard yang sudah ada)
                         message_id = existing_jobs[0]['message_id']
-                        await query.message.delete()
+                        # Hapus pesan selection agar tidak mengacaukan urutan
+                        try:
+                            await query.message.delete()
+                        except:
+                            pass
                     else:
+                        # Ini adalah job pertama untuk user ini, kirim pesan dashboard baru di bawah pesan terakhir
                         username = query.from_user.username or f"ID: {query.from_user.id}"
-                        await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
-                        message_id = query.message.message_id
+                        # Kirim pesan dashboard baru (bukan edit pesan selection)
+                        new_message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"📊 Dashboard Jobs User: {username}",
+                            parse_mode='Markdown'
+                        )
+                        message_id = new_message.message_id
+                        # Hapus pesan selection karena sudah tidak diperlukan
+                        try:
+                            await query.message.delete()
+                        except:
+                            pass
 
                     context.bot_data['active_mirrors'][job_id] = {
                         'chat_id': chat_id,
@@ -117,13 +134,28 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
             existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
             if existing_jobs:
+                # Gunakan message_id yang sama (dashboard yang sudah ada)
                 message_id = existing_jobs[0]['message_id']
-                await query.message.delete() # delete the selection message
+                # Hapus pesan selection agar tidak mengacaukan urutan
+                try:
+                    await query.message.delete()
+                except:
+                    pass
             else:
-                # This is the first job for this user, edit the current message to be the dashboard
+                # Ini adalah job pertama untuk user ini, kirim pesan dashboard baru di bawah pesan terakhir
                 username = query.from_user.username or f"ID: {query.from_user.id}"
-                await query.edit_message_text(f"📊 Dashboard Jobs User: {username}")
-                message_id = query.message.message_id
+                # Kirim pesan dashboard baru (bukan edit pesan selection)
+                new_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📊 Dashboard Jobs User: {username}",
+                    parse_mode='Markdown'
+                )
+                message_id = new_message.message_id
+                # Hapus pesan selection karena sudah tidak diperlukan
+                try:
+                    await query.message.delete()
+                except:
+                    pass
 
             # Store job info
             context.bot_data['active_mirrors'][job_id] = {

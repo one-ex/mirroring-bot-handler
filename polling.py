@@ -91,12 +91,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 
             # Format pesan akhir untuk pekerjaan yang selesai
             final_message_data = format_job_progress(job_info, status_info)
+            reply_markup = InlineKeyboardMarkup(final_message_data['keyboard']) if final_message_data['keyboard'] else None
             try:
                 await bot.send_message(
                     chat_id=chat_id,
                     text=final_message_data['text'],
                     parse_mode='Markdown',
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
+                    reply_markup=reply_markup
                 )
             except Exception as e:
                 logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
