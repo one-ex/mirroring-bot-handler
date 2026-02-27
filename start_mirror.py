@@ -59,28 +59,28 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         context.bot_data['active_mirrors'] = {}
 
                     existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+                    # Hapus pesan selection agar tidak mengacaukan urutan
+                    try:
+                        await query.message.delete()
+                    except:
+                        pass
+                    
                     if existing_jobs:
-                        # Gunakan message_id yang sama (dashboard yang sudah ada)
-                        message_id = existing_jobs[0]['message_id']
-                        # Hapus pesan selection agar tidak mengacaukan urutan
+                        # Hapus pesan dashboard lama
                         try:
-                            await query.message.delete()
+                            await bot.delete_message(chat_id=chat_id, message_id=existing_jobs[0]['message_id'])
                         except:
                             pass
-                    else:
-                        # Ini adalah job pertama untuk user ini, kirim pesan dashboard baru di bawah pesan terakhir
-                        username = query.from_user.username or f"ID: {query.from_user.id}"
-                        # Kirim pesan dashboard baru (bukan edit pesan selection)
-                        new_message = await bot.send_message(
-                            chat_id=chat_id,
-                            text=f"📊 Dashboard Jobs User: {username}"
-                        )
-                        message_id = new_message.message_id
-                        # Hapus pesan selection karena sudah tidak diperlukan
-                        try:
-                            await query.message.delete()
-                        except:
-                            pass
+                        
+                    # Kirim pesan dashboard baru di bawah pesan URL terakhir
+                    username = query.from_user.username or f"ID: {query.from_user.id}"
+                    url_message_id = context.user_data.get('url_message_id')
+                    new_message = await bot.send_message(
+                        chat_id=chat_id,
+                        text=f"📊 Dashboard Jobs User: {username}",
+                        reply_to_message_id=url_message_id
+                    )
+                    message_id = new_message.message_id
 
                     context.bot_data['active_mirrors'][job_id] = {
                         'chat_id': chat_id,
@@ -132,28 +132,28 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 context.bot_data['active_mirrors'] = {}
 
             existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+            # Hapus pesan selection agar tidak mengacaukan urutan
+            try:
+                await query.message.delete()
+            except:
+                pass
+            
             if existing_jobs:
-                # Gunakan message_id yang sama (dashboard yang sudah ada)
-                message_id = existing_jobs[0]['message_id']
-                # Hapus pesan selection agar tidak mengacaukan urutan
+                # Hapus pesan dashboard lama
                 try:
-                    await query.message.delete()
+                    await bot.delete_message(chat_id=chat_id, message_id=existing_jobs[0]['message_id'])
                 except:
                     pass
-            else:
-                # Ini adalah job pertama untuk user ini, kirim pesan dashboard baru di bawah pesan terakhir
-                username = query.from_user.username or f"ID: {query.from_user.id}"
-                # Kirim pesan dashboard baru (bukan edit pesan selection)
-                new_message = await bot.send_message(
-                    chat_id=chat_id,
-                    text=f"📊 Dashboard Jobs User: {username}"
-                )
-                message_id = new_message.message_id
-                # Hapus pesan selection karena sudah tidak diperlukan
-                try:
-                    await query.message.delete()
-                except:
-                    pass
+                
+            # Kirim pesan dashboard baru di bawah pesan URL terakhir
+            username = query.from_user.username or f"ID: {query.from_user.id}"
+            url_message_id = context.user_data.get('url_message_id')
+            new_message = await bot.send_message(
+                chat_id=chat_id,
+                text=f"📊 Dashboard Jobs User: {username}",
+                reply_to_message_id=url_message_id
+            )
+            message_id = new_message.message_id
 
             # Store job info
             context.bot_data['active_mirrors'][job_id] = {

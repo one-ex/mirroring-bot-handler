@@ -53,6 +53,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         url = list(url_entities.values())[0]
 
     context.user_data['url'] = url
+    context.user_data['url_message_id'] = message.message_id
     
     processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
     
