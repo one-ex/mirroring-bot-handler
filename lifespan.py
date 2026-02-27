@@ -54,7 +54,20 @@ async def lifespan(app):
         for service_name, base_url in services_to_warmup.items():
             if base_url:
                 if service_name == "Web Auth Helper":
-                    # Gunakan GitHub Actions untuk warmup Web Auth Helper
+                    # Coba akses langsung URL Web Auth Helper terlebih dahulu
+                    try:
+                        # Gunakan endpoint /warmup jika tersedia, jika tidak coba akses root
+                        warmup_url = f"{base_url}/warmup"
+                        direct_response = await async_client.get(warmup_url, timeout=30)
+                        if direct_response.status_code == 200:
+                            logger.info(f"Web Auth Helper langsung dapat diakses di {warmup_url}. Warmup via GitHub dilewati.")
+                            continue  # Skip GitHub warmup
+                        else:
+                            logger.warning(f"Akses langsung ke Web Auth Helper gagal dengan status {direct_response.status_code}. Akan coba via GitHub.")
+                    except Exception as e:
+                        logger.warning(f"Tidak dapat mengakses Web Auth Helper langsung: {e}. Akan coba via GitHub.")
+                    
+                    # Jika akses langsung gagal, gunakan GitHub Actions untuk warmup Web Auth Helper
                     warmup_tasks.append(trigger_github_warmup(base_url))
                 else:
                     # Untuk layanan lain, gunakan endpoint /warmup
