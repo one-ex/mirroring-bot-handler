@@ -72,7 +72,7 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(conv_handler)
-    application.add_handler(MessageHandler(filters.COMMAND, stop_mirror_command_handler))
+    application.add_handler(CommandHandler("stop", stop_mirror_command_handler))
 
     logger.info("Starting bot in webhook mode...")
     uvicorn.run(app, host="0.0.0.0", port=10000)

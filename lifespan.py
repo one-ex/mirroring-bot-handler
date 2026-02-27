@@ -10,16 +10,10 @@ from config import (
     GITHUB_PAT,
     GITHUB_REPOSITORY,
 )
-from polling import poll_web_auth_service
-
 @asynccontextmanager
 async def lifespan(app):
     # Startup
     logger.info("Starting up...")
-    
-    # Start the background poller for the Web Auth service
-    logger.info("Starting background poller for Web Auth service...")
-    asyncio.create_task(poll_web_auth_service())
     
     # Warm up other services
     logger.info("Warming up services...")
