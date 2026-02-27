@@ -1,11 +1,64 @@
 import asyncio
 import httpx
 import logging
+import time
 from telegram.ext import ContextTypes
 from telegram import InlineKeyboardMarkup
 
 from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
 from utils import format_job_progress
+
+logger = logging.getLogger(__name__)
+
+# Dictionary untuk melacak waktu terakhir pengiriman pesan per chat
+_last_message_time = {}
+
+async def send_with_rate_limit(bot, chat_id, text, parse_mode='Markdown', disable_web_page_preview=True, reply_markup=None, delay_seconds=1.0):
+    """Mengirim pesan dengan rate limiting sederhana untuk menghindari flood control."""
+    current_time = time.time()
+    last_time = _last_message_time.get(chat_id, 0)
+    
+    # Hitung waktu tunggu jika perlu
+    elapsed = current_time - last_time
+    if elapsed < delay_seconds:
+        wait_time = delay_seconds - elapsed
+        await asyncio.sleep(wait_time)
+    
+    # Kirim pesan
+    try:
+        message = await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview,
+            reply_markup=reply_markup
+        )
+        _last_message_time[chat_id] = time.time()
+        return message
+    except Exception as e:
+        logger.error(f"Failed to send message to chat {chat_id}: {e}")
+        raise
+
+async def send_with_exponential_backoff(bot, chat_id, text, parse_mode='Markdown', disable_web_page_preview=True, reply_markup=None, max_retries=3):
+    """Mengirim pesan dengan exponential backoff retry untuk menangani error sementara."""
+    base_delay = 1.0  # 1 detik delay awal
+    max_delay = 30.0  # 30 detik delay maksimum
+    
+    for attempt in range(max_retries + 1):  # +1 untuk percobaan pertama
+        try:
+            return await send_with_rate_limit(
+                bot, chat_id, text, parse_mode, 
+                disable_web_page_preview, reply_markup
+            )
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Failed to send message to chat {chat_id} after {max_retries} retries: {e}")
+                raise
+            
+            # Hitung delay dengan exponential backoff
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            logger.warning(f"Retry {attempt + 1}/{max_retries} for chat {chat_id} in {delay:.1f} seconds: {e}")
+            await asyncio.sleep(delay)
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +146,8 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             final_message_data = format_job_progress(job_info, status_info)
             reply_markup = InlineKeyboardMarkup(final_message_data['keyboard']) if final_message_data['keyboard'] else None
             try:
-                await bot.send_message(
+                await send_with_exponential_backoff(
+                    bot=bot,
                     chat_id=chat_id,
                     text=final_message_data['text'],
                     parse_mode='Markdown',
@@ -150,10 +204,12 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 # Update the state after successful edit
                 context.bot_data['dashboard_state'][chat_id] = full_text
             except Exception as e:
-                if "Message to edit not found" in str(e):
+                error_str = str(e)
+                if "Message to edit not found" in error_str:
                     # Pesan dashboard hilang, kirim pesan baru dan perbarui semua job di chat ini
                     try:
-                        new_message = await bot.send_message(
+                        new_message = await send_with_exponential_backoff(
+                            bot=bot,
                             chat_id=chat_id,
                             text=full_text,
                             reply_markup=reply_markup,
@@ -170,6 +226,30 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                         logger.info(f"Dashboard message for chat {chat_id} was missing, created new one with message_id {new_message_id}")
                     except Exception as e2:
                         logger.error(f"Failed to create new dashboard for chat {chat_id}: {e2}")
+                elif "Flood control exceeded" in error_str or "Retry after" in error_str.lower():
+                    # Tangani error flood control dengan menunggu dan mencoba lagi
+                    try:
+                        # Ekstrak waktu tunggu dari error message
+                        import re
+                        wait_match = re.search(r'Retry in (\d+) seconds', error_str)
+                        wait_seconds = int(wait_match.group(1)) if wait_match else 5
+                        
+                        logger.warning(f"Flood control for chat {chat_id}, waiting {wait_seconds} seconds before retry")
+                        await asyncio.sleep(wait_seconds)
+                        
+                        # Coba edit lagi
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=full_text,
+                            reply_markup=reply_markup,
+                            parse_mode='Markdown',
+                            disable_web_page_preview=True
+                        )
+                        context.bot_data['dashboard_state'][chat_id] = full_text
+                        logger.info(f"Successfully edited dashboard for chat {chat_id} after flood control wait")
+                    except Exception as e2:
+                        logger.warning(f"Failed to edit dashboard for chat {chat_id} even after flood control wait: {e2}")
                 else:
                     logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
 
