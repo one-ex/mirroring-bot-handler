@@ -73,8 +73,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         # Kirim pesan dashboard baru (bukan edit pesan selection)
                         new_message = await bot.send_message(
                             chat_id=chat_id,
-                            text=f"📊 Dashboard Jobs User: {username}",
-                            parse_mode='Markdown'
+                            text=f"📊 Dashboard Jobs User: {username}"
                         )
                         message_id = new_message.message_id
                         # Hapus pesan selection karena sudah tidak diperlukan
@@ -147,8 +146,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 # Kirim pesan dashboard baru (bukan edit pesan selection)
                 new_message = await bot.send_message(
                     chat_id=chat_id,
-                    text=f"📊 Dashboard Jobs User: {username}",
-                    parse_mode='Markdown'
+                    text=f"📊 Dashboard Jobs User: {username}"
                 )
                 message_id = new_message.message_id
                 # Hapus pesan selection karena sudah tidak diperlukan

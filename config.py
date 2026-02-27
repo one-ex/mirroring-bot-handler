@@ -1,7 +1,11 @@
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ModuleNotFoundError:
+    # dotenv tidak tersedia (misalnya di Render), bergantung pada environment variables yang sudah diatur
+    pass
 
 # Variabel Lingkungan & Konfigurasi
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
