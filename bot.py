@@ -49,8 +49,8 @@ async def telegram_webhook(request: Request):
     await application.process_update(update)
     return {"status": "ok"}
 
-@app.get("/")
-def index():
+@app.get("/health")
+def health_check():
     return {"status": "ok"}
 
 def main() -> None:
