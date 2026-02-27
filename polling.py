@@ -150,7 +150,28 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 # Update the state after successful edit
                 context.bot_data['dashboard_state'][chat_id] = full_text
             except Exception as e:
-                logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
+                if "Message to edit not found" in str(e):
+                    # Pesan dashboard hilang, kirim pesan baru dan perbarui semua job di chat ini
+                    try:
+                        new_message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=full_text,
+                            reply_markup=reply_markup,
+                            parse_mode='Markdown',
+                            disable_web_page_preview=True
+                        )
+                        new_message_id = new_message.message_id
+                        # Perbarui message_id untuk semua job di chat ini
+                        for job_id_old, job_info in context.bot_data['active_mirrors'].items():
+                            if job_info['chat_id'] == chat_id:
+                                context.bot_data['active_mirrors'][job_id_old]['message_id'] = new_message_id
+                        # Update dashboard state
+                        context.bot_data['dashboard_state'][chat_id] = full_text
+                        logger.info(f"Dashboard message for chat {chat_id} was missing, created new one with message_id {new_message_id}")
+                    except Exception as e2:
+                        logger.error(f"Failed to create new dashboard for chat {chat_id}: {e2}")
+                else:
+                    logger.warning(f"Failed to edit dashboard for chat {chat_id}: {e}")
 
     # Clean up finished jobs from the active list
     for job_id in finished_jobs_to_remove:
@@ -170,11 +191,3 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         for job in jobs:
             job.schedule_removal()
             logger.info("Polling job 'update_progress' stopped as there are no active jobs.")
-
-
-    # --- Logika untuk menghentikan poller jika tidak ada lagi pekerjaan ---
-    if not context.bot_data.get('active_mirrors'):
-        jobs = context.application.job_queue.get_jobs_by_name('update_progress_job')
-        for job in jobs:
-            job.schedule_removal()
-            logger.info("All mirror jobs finished. Progress poller stopped.")

@@ -65,10 +65,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     except:
                         pass
                     
+                    # Hapus pesan dashboard lama jika ada
                     if existing_jobs:
-                        # Hapus pesan dashboard lama
+                        old_message_id = existing_jobs[0]['message_id']
                         try:
-                            await bot.delete_message(chat_id=chat_id, message_id=existing_jobs[0]['message_id'])
+                            await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
                         except:
                             pass
                         
@@ -81,6 +82,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         reply_to_message_id=url_message_id
                     )
                     message_id = new_message.message_id
+                    
+                    # Perbarui message_id untuk semua job lama di chat yang sama
+                    for job_id_old, job_info in context.bot_data['active_mirrors'].items():
+                        if job_info['chat_id'] == chat_id:
+                            context.bot_data['active_mirrors'][job_id_old]['message_id'] = message_id
 
                     context.bot_data['active_mirrors'][job_id] = {
                         'chat_id': chat_id,
@@ -138,10 +144,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             except:
                 pass
             
+            # Hapus pesan dashboard lama jika ada
             if existing_jobs:
-                # Hapus pesan dashboard lama
+                old_message_id = existing_jobs[0]['message_id']
                 try:
-                    await bot.delete_message(chat_id=chat_id, message_id=existing_jobs[0]['message_id'])
+                    await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
                 except:
                     pass
                 
@@ -154,6 +161,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 reply_to_message_id=url_message_id
             )
             message_id = new_message.message_id
+            
+            # Perbarui message_id untuk semua job lama di chat yang sama
+            for job_id_old, job_info in context.bot_data['active_mirrors'].items():
+                if job_info['chat_id'] == chat_id:
+                    context.bot_data['active_mirrors'][job_id_old]['message_id'] = message_id
 
             # Store job info
             context.bot_data['active_mirrors'][job_id] = {
