@@ -82,10 +82,20 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
             keyboard = [[InlineKeyboardButton("🌐 Open Link", url=download_url)]]
         return {"text": text, "keyboard": keyboard}
 
-    if status in ['Failed', 'Cancelled', 'Gagal', 'Dibatalkan']:
+    if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
         text = (
             f"📄 **File Name:** `{full_file_name}`\n"
-            f"⚙️ **Status:** {status} ❌"
+            f"⚙️ **Status:** {status.capitalize()} ❌"
+        )
+        return {"text": text, "keyboard": []}
+
+    # Handle status 'cancelling' as active job
+    if status.lower() == 'cancelling':
+        text = (
+            f"📄 **File Name:** `{full_file_name}`\n"
+            f"💾 **Size:** `{size}`\n"
+            f"⚙️ **Status:** Cancelling ⏳\n"
+            f"🔄 Sedang membatalkan proses mirroring..."
         )
         return {"text": text, "keyboard": []}
 

@@ -136,6 +136,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                 status_info['status'] = 'cancelled'
         
         # Tangani pekerjaan yang selesai: kirim pesan terpisah dan tandai untuk dihapus
+        # Status 'cancelling' tidak dianggap sebagai status final
         if status_info.get('status') in ['completed', 'failed', 'cancelled']:
             finished_jobs_to_remove.append(job_id)
             
