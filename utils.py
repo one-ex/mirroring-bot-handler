@@ -1,3 +1,9 @@
+# Daftar Isi Variable
+# async def get_file_info_from_url
+# def format_bytes
+# def format_job_progress
+# def check_gdrive_token
+
 import os
 import re
 import logging

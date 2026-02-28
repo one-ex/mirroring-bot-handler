@@ -1,3 +1,9 @@
+# Daftar Isi Variable
+# async def setup_bot
+# async def setup_webhook
+# async def webhook
+# async def health_check
+
 import os
 import logging
 import psycopg2

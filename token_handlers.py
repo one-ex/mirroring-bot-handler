@@ -1,3 +1,9 @@
+# Daftar Isi Variable
+# def check_authorization
+# async def view_tokens_handler
+# async def delete_token_handler
+# async def confirm_delete_handler
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from database_manager import DatabaseManager

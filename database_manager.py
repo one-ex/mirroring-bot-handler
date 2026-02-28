@@ -1,3 +1,12 @@
+# Daftar Isi Variable
+# class DatabaseManager
+# def __init__
+# def connect
+# def check_gdrive_token
+# def delete_token
+# def list_all_tokens
+# def close
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from config import DATABASE_URL

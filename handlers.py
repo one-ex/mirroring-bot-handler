@@ -1,3 +1,11 @@
+# Daftar Isi Variable
+# async def start
+# async def url_handler
+# async def select_service
+# async def cancel
+# async def cancel_gdrive_login
+# async def stop_mirror_command_handler
+
 import re
 import httpx
 import logging

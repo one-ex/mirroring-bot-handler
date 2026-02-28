@@ -1,3 +1,7 @@
+# Daftar Isi Variable
+# async def trigger_github_warmup
+# async def lifespan
+
 import asyncio
 import httpx
 import logging
