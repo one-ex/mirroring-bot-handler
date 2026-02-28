@@ -1,3 +1,8 @@
+# Daftar Isi Variable
+# async def send_with_rate_limit
+# async def send_with_exponential_backoff
+# async def update_progress
+
 import asyncio
 import httpx
 import logging

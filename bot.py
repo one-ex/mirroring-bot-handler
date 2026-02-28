@@ -40,6 +40,19 @@ from handlers import (
     stop_mirror_command_handler
 )
 
+# Import fungsi-fungsi handler untuk manajemen token
+try:
+    from token_handlers import (
+        view_tokens_handler,
+        delete_token_handler,
+        confirm_delete_handler
+    )
+except ImportError:
+    view_tokens_handler = None
+    delete_token_handler = None
+    confirm_delete_handler = None
+    logger.warning("Token handlers module not found, token management commands will be disabled.")
+
 # Import fungsi start_mirror dari start_mirror.py
 from start_mirror import start_mirror
 
@@ -91,6 +104,15 @@ def setup_bot():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/STOP_'), stop_mirror_command_handler))
+    
+    # Daftarkan handler untuk manajemen token jika tersedia
+    if view_tokens_handler:
+        application.add_handler(CommandHandler("view_tokens", view_tokens_handler))
+    if delete_token_handler:
+        application.add_handler(CommandHandler("delete_token", delete_token_handler))
+    if confirm_delete_handler:
+        application.add_handler(CommandHandler("confirm_delete", confirm_delete_handler))
+    
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
