@@ -46,6 +46,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_approval_requests_updated_at ON approval_requests;
 CREATE TRIGGER update_approval_requests_updated_at 
     BEFORE UPDATE ON approval_requests
     FOR EACH ROW

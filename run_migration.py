@@ -72,9 +72,14 @@ try:
         print("✅ Migration berhasil!")
         print(result.stdout)
     else:
-        print("❌ Migration gagal!")
-        print("Error:", result.stderr)
-        sys.exit(1)
+        # Cek apakah error hanya karena trigger sudah ada (bukan error fatal)
+        if "trigger \"update_approval_requests_updated_at\" for relation \"approval_requests\" already exists" in result.stderr:
+            print("⚠️  Migration warning: Trigger sudah ada, melanjutkan...")
+            print(result.stderr)
+        else:
+            print("❌ Migration gagal!")
+            print("Error:", result.stderr)
+            sys.exit(1)
         
 except Exception as e:
     print(f"❌ Error: {e}")
