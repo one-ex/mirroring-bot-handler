@@ -66,9 +66,12 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     user_id=user_id,
                     permissions=ChatPermissions(
                         can_send_messages=False,
-                        can_send_media_messages=False,
+                        can_send_polls=False,
                         can_send_other_messages=False,
-                        can_add_web_page_previews=False
+                        can_add_web_page_previews=False,
+                        can_send_photos=False,
+                        can_send_videos=False,
+                        can_send_documents=False
                     )
                 )
                 logger.info(f"Member baru dibatasi: {username} (ID: {user_id}) di chat {chat.id}")
@@ -188,9 +191,12 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 user_id=target_user_id,
                 permissions=ChatPermissions(
                     can_send_messages=True,
-                    can_send_media_messages=True,
+                    can_send_polls=True,
                     can_send_other_messages=True,
-                    can_add_web_page_previews=True
+                    can_add_web_page_previews=True,
+                    can_send_photos=True,
+                    can_send_videos=True,
+                    can_send_documents=True
                 )
             )
             

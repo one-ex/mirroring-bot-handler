@@ -70,7 +70,7 @@ class DatabaseManager:
         """Memeriksa apakah user sudah di-approve untuk chat tertentu"""
         query = """
             SELECT 1 FROM approved_users 
-            WHERE telegram_user_id = %s AND chat_id = %s AND status = 'approved'
+            WHERE telegram_user_id = %s AND chat_id = %s
         """
         try:
             with self.connection.cursor() as cursor:
