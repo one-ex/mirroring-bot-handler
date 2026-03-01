@@ -12,7 +12,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntity
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import AUTHORIZED_USER_IDS, SELECTING_ACTION, SELECTING_SERVICE, GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
+from config import OWNER_ID, SELECTING_ACTION, SELECTING_SERVICE, GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
 from utils import get_file_info_from_url
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Terapkan otorisasi hanya di chat pribadi
     if chat.type == 'private':
-        if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+        if user.id != OWNER_ID:
             await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini di chat pribadi.")
             return
 
@@ -40,7 +40,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     # Terapkan otorisasi hanya di chat pribadi
     if chat.type == 'private':
-        if AUTHORIZED_USER_IDS and user.id not in AUTHORIZED_USER_IDS:
+        if user.id != OWNER_ID:
             await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini di chat pribadi.")
             return ConversationHandler.END
 
@@ -63,7 +63,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['url'] = url
     context.user_data['url_message_id'] = message.message_id
     
-    processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...")
+    processing_message = await message.reply_text("🔎 Menganalisis URL, mohon tunggu...", reply_to_message_id=message.message_id)
     
     info = await get_file_info_from_url(url)
     
@@ -76,6 +76,8 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
     context.user_data['file_info'] = info
+    context.user_data['processing_message_id'] = processing_message.message_id
+    context.user_data['user_id'] = user.id
 
     keyboard = [
         [InlineKeyboardButton("✅ Lanjutkan", callback_data='continue'),
@@ -99,6 +101,11 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
 
+    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
+    if query.from_user.id != context.user_data.get('user_id'):
+        await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
+        return SELECTING_ACTION
+
     keyboard = [
         [InlineKeyboardButton("📁 GoFile", callback_data='gofile'),
          InlineKeyboardButton("💧 PixelDrain", callback_data='pixeldrain')],
@@ -115,6 +122,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
     query = update.callback_query
     if query:
+        # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
+        if query.from_user.id != context.user_data.get('user_id'):
+            await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
+            return SELECTING_ACTION
         await query.answer()
         await query.edit_message_text(text="🚫 Permintaan dibatalkan.")
     else:
@@ -126,6 +137,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def cancel_gdrive_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan proses login GDrive."""
     query = update.callback_query
+    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
+    if query.from_user.id != context.user_data.get('user_id'):
+        await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
+        return SELECTING_SERVICE
     await query.answer()
     await query.edit_message_text("Login Google Drive dibatalkan.")
     context.user_data.clear()

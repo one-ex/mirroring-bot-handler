@@ -28,7 +28,7 @@ from config import (
     DATABASE_URL,
     WEB_AUTH_URL,
     WEBHOOK_HOST,
-    AUTHORIZED_USER_IDS,
+    OWNER_ID,
     GITHUB_PAT,
     GITHUB_REPOSITORY,
     POLLING_INTERVAL,
@@ -44,6 +44,13 @@ from handlers import (
     cancel,
     cancel_gdrive_login,
     stop_mirror_command_handler
+)
+
+# Import fungsi-fungsi handler untuk riwayat jobs
+from jobs_history import (
+    jobs_history_handler,
+    select_worker_handler,
+    jobs_back_handler
 )
 
 # Import fungsi-fungsi handler untuk manajemen token
@@ -88,6 +95,7 @@ def setup_bot():
     """Mengatur semua handler dan job queue untuk bot."""
     # Initialize bot_data dan JobQueue
     application.bot_data['active_mirrors'] = {}
+    application.bot_data['async_client'] = async_client
     job_queue = application.job_queue
     job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=0)
 
@@ -110,6 +118,11 @@ def setup_bot():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
     application.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r'^/STOP_'), stop_mirror_command_handler))
+    
+    # Handler untuk riwayat jobs
+    application.add_handler(CommandHandler("jobs_history", jobs_history_handler))
+    application.add_handler(CallbackQueryHandler(select_worker_handler, pattern='^jobs_(gofile|pixeldrain|gdrive|all)$'))
+    application.add_handler(CallbackQueryHandler(jobs_back_handler, pattern='^jobs_back$'))
     
     # Daftarkan handler untuk manajemen token jika tersedia
     if view_tokens_handler:

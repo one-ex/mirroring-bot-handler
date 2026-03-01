@@ -6,7 +6,7 @@
 # DATABASE_URL
 # WEB_AUTH_URL
 # WEBHOOK_HOST
-# AUTHORIZED_USER_IDS
+# OWNER_ID
 # GITHUB_PAT
 # GITHUB_REPOSITORY
 # POLLING_INTERVAL
@@ -38,7 +38,11 @@ if not WEBHOOK_HOST:
     raise ValueError("Tidak ada WEBHOOK_HOST ditemukan di environment variables")
 
 # ID Telegram Super User
-AUTHORIZED_USER_IDS = [int(user_id) for user_id in os.getenv('AUTHORIZED_USER_IDS', '').split(',') if user_id]
+OWNER_ID = os.getenv('OWNER_ID')
+if OWNER_ID:
+    OWNER_ID = int(OWNER_ID)
+else:
+    OWNER_ID = 0  # Nilai default yang tidak mungkin menjadi ID user valid
 
 # Komponen WarmUp
 GITHUB_PAT = os.getenv('GITHUB_PAT')

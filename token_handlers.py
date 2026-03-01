@@ -7,13 +7,13 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from database_manager import DatabaseManager
-from config import AUTHORIZED_USER_IDS
+from config import OWNER_ID
 import logging
 
 logger = logging.getLogger(__name__)
 
 def check_authorization(user_id: int) -> bool:
-    return user_id in AUTHORIZED_USER_IDS
+    return user_id == OWNER_ID
 
 async def view_tokens_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

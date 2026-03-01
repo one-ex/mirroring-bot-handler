@@ -23,6 +23,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     await query.answer()
 
+    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
+    if user_id != context.user_data.get('user_id'):
+        await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
+        return SELECTING_SERVICE
+
     if service == 'gdrive':
         if not WEB_AUTH_URL:
             await query.edit_message_text("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel.")
