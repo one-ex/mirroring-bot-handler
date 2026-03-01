@@ -11,11 +11,13 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     request_time TIMESTAMP NOT NULL DEFAULT NOW(),
     processed_time TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    
-    -- Constraint untuk memastikan tidak ada duplicate pending request untuk user di chat yang sama
-    UNIQUE(telegram_user_id, chat_id, status) WHERE status = 'pending'
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Partial unique index untuk memastikan tidak ada duplicate pending request untuk user di chat yang sama
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pending_request 
+ON approval_requests(telegram_user_id, chat_id) 
+WHERE status = 'pending';
 
 -- Tabel untuk menyimpan user yang sudah di-approve
 CREATE TABLE IF NOT EXISTS approved_users (
