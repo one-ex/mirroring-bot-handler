@@ -66,6 +66,9 @@ except ImportError:
     confirm_delete_handler = None
     logger.warning("Token handlers module not found, token management commands will be disabled.")
 
+# Import fungsi-fungsi handler untuk group approval
+from group_approval import get_handlers as get_group_approval_handlers
+
 # Import fungsi start_mirror dari start_mirror.py
 from start_mirror import start_mirror
 
@@ -131,6 +134,10 @@ def setup_bot():
         application.add_handler(CommandHandler("delete_token", delete_token_handler))
     if confirm_delete_handler:
         application.add_handler(CommandHandler("confirm_delete", confirm_delete_handler))
+    
+    # Daftarkan handlers untuk group approval
+    for handler in get_group_approval_handlers():
+        application.add_handler(handler)
     
     logger.info("Bot handlers and job queue have been set up.")
 
