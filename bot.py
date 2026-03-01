@@ -10,6 +10,7 @@ import psycopg2
 import re
 import httpx
 import asyncio
+import datetime
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from starlette.applications import Starlette
@@ -67,7 +68,7 @@ except ImportError:
     logger.warning("Token handlers module not found, token management commands will be disabled.")
 
 # Import fungsi-fungsi handler untuk group approval
-from group_approval import get_handlers as get_group_approval_handlers
+from group_approval import get_handlers as get_group_approval_handlers, cleanup_old_requests
 
 # Import fungsi start_mirror dari start_mirror.py
 from start_mirror import start_mirror
@@ -101,6 +102,9 @@ def setup_bot():
     application.bot_data['async_client'] = async_client
     job_queue = application.job_queue
     job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=0)
+    
+    # Schedule cleanup untuk approval requests (setiap hari)
+    job_queue.run_daily(cleanup_old_requests, time=datetime.time(hour=3, minute=0), days=(0, 1, 2, 3, 4, 5, 6))
 
     # Daftarkan semua handler
     conv_handler = ConversationHandler(

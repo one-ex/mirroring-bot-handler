@@ -9,3 +9,6 @@ bot copy.py
 .env
 bot_base.py
 bot_backup.py
+test_database_integration.py
+test_approval_integration.py
+verify_approval_changes.py

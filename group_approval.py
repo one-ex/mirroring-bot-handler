@@ -12,13 +12,17 @@ from datetime import datetime, timedelta
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import OWNER_ID
+from database_manager import DatabaseManager
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# Database sederhana untuk menyimpan status approval
-# Format: {user_id: {"username": str, "chat_id": int, "request_time": datetime, "status": str}}
-approval_requests: Dict[int, dict] = {}
+# Inisialisasi database manager
+db_manager = DatabaseManager()
+
+# Cache sederhana untuk mengurangi query ke database
+# Format: {user_id: {"username": str, "chat_id": int, "status": str}}
+approval_cache: Dict[int, dict] = {}
 
 
 def check_authorization(user_id: int) -> bool:
@@ -50,8 +54,9 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             if member.is_bot:
                 continue
             
-            # Skip jika user sudah di-approve sebelumnya
-            if user_id in approval_requests and approval_requests[user_id].get("status") == "approved":
+            # Cek di database apakah user sudah di-approve sebelumnya
+            if db_manager.check_approved_user(user_id, chat.id):
+                logger.info(f"User {username} (ID: {user_id}) sudah di-approve sebelumnya di chat {chat.id}")
                 continue
             
             # Restrict user - tidak bisa mengirim pesan sampai di-approve
@@ -71,14 +76,18 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 logger.error(f"Gagal membatasi member {user_id}: {e}")
                 continue
             
-            # Simpan request approval
-            approval_requests[user_id] = {
-                "username": username,
-                "chat_id": chat.id,
-                "request_time": datetime.now(),
-                "status": "pending",
-                "message_id": None
-            }
+            # Simpan request approval ke database
+            if db_manager.save_approval_request(user_id, username, chat.id):
+                # Update cache
+                approval_cache[user_id] = {
+                    "username": username,
+                    "chat_id": chat.id,
+                    "status": "pending",
+                    "message_id": None
+                }
+            else:
+                logger.error(f"Gagal menyimpan approval request untuk user {user_id} di chat {chat.id}")
+                continue
             
             # Kirim notifikasi ke owner
             keyboard = [
@@ -101,7 +110,9 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     parse_mode="Markdown",
                     reply_markup=reply_markup
                 )
-                approval_requests[user_id]["message_id"] = message.message_id
+                # Update cache dengan message_id
+                if user_id in approval_cache:
+                    approval_cache[user_id]["message_id"] = message.message_id
             except Exception as e:
                 logger.error(f"Gagal mengirim notifikasi ke owner: {e}")
             
@@ -147,18 +158,27 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
         logger.error(f"Format callback data tidak valid: {callback_data}")
         return
     
-    # Cek apakah request masih pending
-    if target_user_id not in approval_requests:
-        await query.edit_message_text("⚠️ Permintaan approval sudah tidak valid atau sudah diproses.")
+    # Untuk mendapatkan chat_id, kita perlu menyimpannya di callback data
+    # Tapi karena kita tidak bisa mengubah callback data yang sudah dikirim,
+    # kita akan menggunakan pendekatan yang berbeda:
+    # 1. Simpan chat_id di cache saat membuat request
+    # 2. Gunakan cache untuk mendapatkan chat_id
+    
+    if target_user_id not in approval_cache:
+        await query.edit_message_text("⚠️ Data request tidak ditemukan di cache. Silakan gunakan command manual.")
         return
     
-    request_data = approval_requests[target_user_id]
-    if request_data["status"] != "pending":
-        await query.edit_message_text(f"⚠️ Permintaan sudah di-{request_data['status']} sebelumnya.")
+    cache_data = approval_cache[target_user_id]
+    if cache_data.get("status") != "pending":
+        await query.edit_message_text(f"⚠️ Permintaan sudah di-{cache_data.get('status')} sebelumnya.")
         return
     
-    chat_id = request_data["chat_id"]
-    username = request_data["username"]
+    chat_id = cache_data.get("chat_id")
+    username = cache_data.get("username")
+    
+    if not chat_id:
+        await query.edit_message_text("⚠️ Chat ID tidak ditemukan. Silakan gunakan command manual.")
+        return
     
     if action == "approve":
         # Beri hak akses normal ke user
@@ -174,9 +194,14 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 )
             )
             
-            # Update status
-            approval_requests[target_user_id]["status"] = "approved"
-            approval_requests[target_user_id]["approval_time"] = datetime.now()
+            # Update status di database
+            if db_manager.update_approval_status(target_user_id, chat_id, "approved"):
+                # Update cache
+                approval_cache[target_user_id]["status"] = "approved"
+                approval_cache[target_user_id]["approval_time"] = datetime.now()
+            else:
+                await query.edit_message_text("❌ Gagal mengupdate status approval di database.")
+                return
             
             # Update message owner
             await query.edit_message_text(
@@ -213,9 +238,14 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 until_date=datetime.now() + timedelta(seconds=30)  # Ban sementara
             )
             
-            # Update status
-            approval_requests[target_user_id]["status"] = "rejected"
-            approval_requests[target_user_id]["rejection_time"] = datetime.now()
+            # Update status di database
+            if db_manager.update_approval_status(target_user_id, chat_id, "rejected"):
+                # Update cache
+                approval_cache[target_user_id]["status"] = "rejected"
+                approval_cache[target_user_id]["rejection_time"] = datetime.now()
+            else:
+                await query.edit_message_text("❌ Gagal mengupdate status rejection di database.")
+                return
             
             # Update message owner
             await query.edit_message_text(
@@ -245,30 +275,45 @@ async def list_pending_requests_handler(update: Update, context: ContextTypes.DE
         await update.message.reply_text("❌ Tidak diizinkan.")
         return
     
-    # Filter requests yang masih pending
-    pending_requests = [
-        (uid, data) for uid, data in approval_requests.items() 
-        if data.get("status") == "pending"
-    ]
+    # Ambil pending requests dari database
+    pending_requests_data = db_manager.get_pending_requests()
     
-    if not pending_requests:
+    if not pending_requests_data:
         await update.message.reply_text("📭 Tidak ada permintaan approval yang pending.")
         return
     
     response = "📋 **Daftar Permintaan Approval Pending**\n\n"
     
-    for i, (user_id, data) in enumerate(pending_requests, 1):
-        username = data["username"]
-        request_time = data["request_time"]
-        age = datetime.now() - request_time
+    for i, request in enumerate(pending_requests_data, 1):
+        user_id = request["telegram_user_id"]
+        username = request["username"]
+        chat_id = request["chat_id"]
+        request_time = request["request_time"]
+        
+        # Update cache
+        if user_id not in approval_cache:
+            approval_cache[user_id] = {
+                "username": username,
+                "chat_id": chat_id,
+                "status": "pending",
+                "request_time": request_time
+            }
+        
+        # Calculate age
+        if isinstance(request_time, datetime):
+            age = datetime.now() - request_time
+        else:
+            # Jika dari database, mungkin sudah datetime object
+            age = datetime.now() - request_time
         
         response += (
             f"{i}. **{username}**\n"
             f"   • ID: `{user_id}`\n"
+            f"   • Chat ID: `{chat_id}`\n"
             f"   • Request: {request_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"   • Usia: {age.days}d {age.seconds//3600}h {(age.seconds//60)%60}m\n\n"
         )
-    
+     
     await update.message.reply_text(response, parse_mode="Markdown")
 
 
@@ -277,19 +322,21 @@ async def cleanup_old_requests() -> None:
     Bersihkan request yang sudah terlalu lama (lebih dari 7 hari).
     Bisa dijadikan scheduled task.
     """
-    cutoff_time = datetime.now() - timedelta(days=7)
+    deleted_count = db_manager.cleanup_old_requests(days=7)
     
-    to_delete = []
-    for user_id, data in approval_requests.items():
-        request_time = data.get("request_time")
-        if request_time and request_time < cutoff_time:
-            to_delete.append(user_id)
-    
-    for user_id in to_delete:
-        del approval_requests[user_id]
-    
-    if to_delete:
-        logger.info(f"Bersihkan {len(to_delete)} request approval yang sudah lama.")
+    # Juga bersihkan cache untuk request yang sudah dihapus dari database
+    if deleted_count > 0:
+        cutoff_time = datetime.now() - timedelta(days=7)
+        to_delete = []
+        for user_id, data in approval_cache.items():
+            request_time = data.get("request_time")
+            if request_time and request_time < cutoff_time:
+                to_delete.append(user_id)
+        
+        for user_id in to_delete:
+            del approval_cache[user_id]
+        
+        logger.info(f"Bersihkan {deleted_count} request approval yang sudah lama dari database dan cache.")
 
 
 # Command untuk manual approve/reject (jika tombol tidak berfungsi)
