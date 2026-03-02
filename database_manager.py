@@ -17,19 +17,28 @@ logger = logging.getLogger(__name__)
 class DatabaseManager:
     def __init__(self):
         self.connection = None
+        self.connected = False
         self.connect()
     
     def connect(self):
         """Membuat koneksi ke database PostgreSQL"""
         try:
             self.connection = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            self.connected = True
             logger.info("Koneksi database berhasil")
         except Exception as e:
             logger.error(f"Gagal terhubung ke database: {e}")
-            raise
+            logger.warning("Bot akan berjalan tanpa koneksi database. Beberapa fitur mungkin tidak berfungsi.")
+            self.connected = False
+            # Jangan raise error, biarkan bot tetap berjalan
+            self.connection = None
     
     def check_gdrive_token(self, user_id: int) -> dict:
         """Memeriksa apakah user memiliki token GDrive"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip check token untuk user {user_id}")
+            return None
+        
         query = "SELECT * FROM user_tokens WHERE telegram_user_id = %s"
         try:
             with self.connection.cursor() as cursor:
@@ -42,6 +51,10 @@ class DatabaseManager:
     
     def delete_token(self, user_id: int) -> bool:
         """Menghapus token untuk user tertentu"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip delete token untuk user {user_id}")
+            return False
+        
         query = "DELETE FROM user_tokens WHERE telegram_user_id = %s"
         try:
             with self.connection.cursor() as cursor:
@@ -57,6 +70,10 @@ class DatabaseManager:
     
     def list_all_tokens(self) -> list:
         """Mendapatkan daftar semua token (hanya untuk admin)"""
+        if not self.connected or self.connection is None:
+            logger.warning("Database tidak tersedia, skip list all tokens")
+            return []
+        
         query = "SELECT telegram_user_id, created_at FROM user_tokens ORDER BY created_at DESC"
         try:
             with self.connection.cursor() as cursor:
@@ -68,6 +85,10 @@ class DatabaseManager:
     
     def check_approved_user(self, user_id: int, chat_id: int) -> bool:
         """Memeriksa apakah user sudah di-approve untuk chat tertentu"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip check approved user {user_id} untuk chat {chat_id}")
+            return False
+        
         query = """
             SELECT 1 FROM approved_users 
             WHERE telegram_user_id = %s AND chat_id = %s
@@ -83,9 +104,13 @@ class DatabaseManager:
 
     def save_approval_request(self, user_id: int, username: str, chat_id: int) -> bool:
         """Menyimpan permintaan approval baru"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip save approval request untuk user {user_id}")
+            return False
+        
         # Pastikan koneksi database masih aktif
         try:
-            if self.connection is None or self.connection.closed != 0:
+            if self.connection.closed != 0:
                 logger.warning("Koneksi database tidak aktif, mencoba reconnect...")
                 self.connect()
         except Exception as conn_error:
@@ -157,6 +182,10 @@ class DatabaseManager:
 
     def update_approval_status(self, user_id: int, chat_id: int, status: str) -> bool:
         """Update status approval (approved/rejected)"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip update approval status untuk user {user_id}")
+            return False
+        
         query = """
             UPDATE approval_requests 
             SET status = %s, processed_time = NOW()
@@ -187,6 +216,10 @@ class DatabaseManager:
 
     def get_pending_requests(self) -> list:
         """Mendapatkan daftar semua permintaan approval yang pending"""
+        if not self.connected or self.connection is None:
+            logger.warning("Database tidak tersedia, skip get pending requests")
+            return []
+        
         query = """
             SELECT telegram_user_id, username, chat_id, request_time
             FROM approval_requests 
@@ -203,6 +236,10 @@ class DatabaseManager:
 
     def cleanup_old_requests(self, days: int = 7) -> int:
         """Bersihkan request yang sudah lama (default: 7 hari)"""
+        if not self.connected or self.connection is None:
+            logger.warning("Database tidak tersedia, skip cleanup old requests")
+            return 0
+        
         query = """
             DELETE FROM approval_requests 
             WHERE request_time < NOW() - INTERVAL '%s days'

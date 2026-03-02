@@ -17,8 +17,13 @@ from database_manager import DatabaseManager
 # Setup logging
 logger = logging.getLogger(__name__)
 
-# Inisialisasi database manager
-db_manager = DatabaseManager()
+# Inisialisasi database manager dengan error handling
+try:
+    db_manager = DatabaseManager()
+except Exception as e:
+    logger.error(f"Gagal menginisialisasi DatabaseManager: {e}")
+    logger.warning("Bot akan berjalan tanpa database. Fitur group approval tidak akan berfungsi.")
+    db_manager = None
 
 # Cache sederhana untuk mengurangi query ke database
 # Format: {user_id: {"username": str, "chat_id": int, "status": str}}
@@ -55,7 +60,7 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 continue
             
             # Cek di database apakah user sudah di-approve sebelumnya
-            if db_manager.check_approved_user(user_id, chat.id):
+            if db_manager and db_manager.check_approved_user(user_id, chat.id):
                 logger.info(f"User {username} (ID: {user_id}) sudah di-approve sebelumnya di chat {chat.id}")
                 continue
             
@@ -80,17 +85,27 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 continue
             
             # Simpan request approval ke database
-            if db_manager.save_approval_request(user_id, username, chat.id):
-                # Update cache
+            if db_manager:
+                if db_manager.save_approval_request(user_id, username, chat.id):
+                    # Update cache
+                    approval_cache[user_id] = {
+                        "username": username,
+                        "chat_id": chat.id,
+                        "status": "pending",
+                        "message_id": None
+                    }
+                else:
+                    logger.error(f"Gagal menyimpan approval request untuk user {user_id} di chat {chat.id}")
+                    continue
+            else:
+                # Jika database tidak tersedia, gunakan cache saja
                 approval_cache[user_id] = {
                     "username": username,
                     "chat_id": chat.id,
                     "status": "pending",
                     "message_id": None
                 }
-            else:
-                logger.error(f"Gagal menyimpan approval request untuk user {user_id} di chat {chat.id}")
-                continue
+                logger.warning(f"Database tidak tersedia, menggunakan cache untuk user {user_id}")
             
             # Kirim notifikasi ke owner
             keyboard = [
@@ -201,13 +216,19 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
             )
             
             # Update status di database
-            if db_manager.update_approval_status(target_user_id, chat_id, "approved"):
-                # Update cache
+            if db_manager:
+                if db_manager.update_approval_status(target_user_id, chat_id, "approved"):
+                    # Update cache
+                    approval_cache[target_user_id]["status"] = "approved"
+                    approval_cache[target_user_id]["approval_time"] = datetime.now()
+                else:
+                    await query.edit_message_text("❌ Gagal mengupdate status approval di database.")
+                    return
+            else:
+                # Jika database tidak tersedia, update cache saja
                 approval_cache[target_user_id]["status"] = "approved"
                 approval_cache[target_user_id]["approval_time"] = datetime.now()
-            else:
-                await query.edit_message_text("❌ Gagal mengupdate status approval di database.")
-                return
+                logger.warning(f"Database tidak tersedia, hanya update cache untuk user {target_user_id}")
             
             # Update message owner
             await query.edit_message_text(
@@ -245,13 +266,19 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
             )
             
             # Update status di database
-            if db_manager.update_approval_status(target_user_id, chat_id, "rejected"):
-                # Update cache
+            if db_manager:
+                if db_manager.update_approval_status(target_user_id, chat_id, "rejected"):
+                    # Update cache
+                    approval_cache[target_user_id]["status"] = "rejected"
+                    approval_cache[target_user_id]["rejection_time"] = datetime.now()
+                else:
+                    await query.edit_message_text("❌ Gagal mengupdate status rejection di database.")
+                    return
+            else:
+                # Jika database tidak tersedia, update cache saja
                 approval_cache[target_user_id]["status"] = "rejected"
                 approval_cache[target_user_id]["rejection_time"] = datetime.now()
-            else:
-                await query.edit_message_text("❌ Gagal mengupdate status rejection di database.")
-                return
+                logger.warning(f"Database tidak tersedia, hanya update cache untuk user {target_user_id}")
             
             # Update message owner
             await query.edit_message_text(
@@ -282,6 +309,10 @@ async def list_pending_requests_handler(update: Update, context: ContextTypes.DE
         return
     
     # Ambil pending requests dari database
+    if not db_manager:
+        await update.message.reply_text("⚠️ Database tidak tersedia. Fitur ini tidak berfungsi.")
+        return
+    
     pending_requests_data = db_manager.get_pending_requests()
     
     if not pending_requests_data:
@@ -328,6 +359,10 @@ async def cleanup_old_requests() -> None:
     Bersihkan request yang sudah terlalu lama (lebih dari 7 hari).
     Bisa dijadikan scheduled task.
     """
+    if not db_manager:
+        logger.warning("Database tidak tersedia, skip cleanup old requests")
+        return
+    
     deleted_count = db_manager.cleanup_old_requests(days=7)
     
     # Juga bersihkan cache untuk request yang sudah dihapus dari database
