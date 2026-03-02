@@ -1,2 +1,19 @@
 language = "python3"
-run = "python bot.py"
+run = "python main.py"
+
+# Replit environment configuration
+[environment]
+  # This ensures the bot runs continuously
+  run = ["python", "main.py"]
+
+# Enable always-on for free tier (requires manual keep-alive via UptimeRobot)
+alwaysOn = false
+
+# Python version
+pythonVersion = "3.12"
+
+# Install dependencies automatically
+install = "pip install -r requirements.txt"
+
+# Hidden files to ignore
+hidden = [".env", "venv/", "__pycache__/", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll"]

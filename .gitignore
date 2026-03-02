@@ -13,3 +13,5 @@ test_database_integration.py
 test_approval_integration.py
 verify_approval_changes.py
 mirroring-bot-handler.tar.gz
+.env.example
+README_REPLIT.md
