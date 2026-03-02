@@ -11,7 +11,11 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     request_time TIMESTAMP NOT NULL DEFAULT NOW(),
     processed_time TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    
+    -- Constraint untuk mencegah duplicate request untuk user di chat yang sama
+    -- (ON CONFLICT membutuhkan constraint ini)
+    UNIQUE(telegram_user_id, chat_id)
 );
 
 -- Partial unique index untuk memastikan tidak ada duplicate pending request untuk user di chat yang sama
