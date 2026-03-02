@@ -1,5 +1,6 @@
 language = "python3"
 run = "python main.py"
+modules = ["python-3.11"]
 
 # Replit environment configuration
 [environment]
@@ -17,3 +18,32 @@ install = "pip install -r requirements.txt"
 
 # Hidden files to ignore
 hidden = [".env", "venv/", "__pycache__/", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll"]
+
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
