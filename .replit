@@ -1,24 +1,49 @@
-language = "python"
+language = "python3"
+run = "python main.py"
 modules = ["python-3.11"]
 
-[packager]
-after = ["pip", "install", "-r", "requirements.txt"]
+# Replit environment configuration
+[environment]
+  # This ensures the bot runs continuously
+  run = ["python", "main.py"]
 
-[workflows]
-runButton = "run Workflow"
+# Enable always-on for free tier (requires manual keep-alive via UptimeRobot)
+alwaysOn = false
 
-[[workflows.workflow]]
-name = "run Workflow"
-mode = "sequential"
-author = 55537756
+# Python version
+pythonVersion = "3.12"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "uvicorn bot:app --host 0.0.0.0 --port 8080"
+# Install dependencies automatically
+install = "pip install -r requirements.txt"
+
+# Hidden files to ignore
+hidden = [".env", "venv/", "__pycache__/", "*.pyc", "*.pyo", "*.pyd", "*.so", "*.dll"]
 
 [agent]
 expertMode = true
 
-[[ports]]
-localPort = 8080
-externalPort = 80
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
