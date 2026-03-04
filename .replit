@@ -1,0 +1,5 @@
+language = "python"
+run = "uvicorn bot:app --host 0.0.0.0 --port 8080"
+
+[packager]
+after = ["pip", "install", "-r", "requirements.txt"]
