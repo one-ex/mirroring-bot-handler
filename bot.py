@@ -170,14 +170,3 @@ routes = [
     Route('/webhook', webhook, methods=['POST'])
 ]
 app = Starlette(routes=routes, lifespan=lifespan)
-
-# Konfigurasi untuk deployment
-if __name__ == "__main__":
-    import uvicorn
-
-    # Render akan mengatur PORT environment variable
-    port = int(os.environ.get("PORT", 10000))
-    host = "0.0.0.0"
-
-    print(f"Starting server on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
