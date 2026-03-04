@@ -1,23 +1,15 @@
 language = "python"
-run = "uvicorn bot:app --host 0.0.0.0 --port 8080"
+run = "uvicorn bot:app --host 0.0.0.0 --port 10000"
 modules = ["python-3.11"]
 
 [packager]
 after = ["pip", "install", "-r", "requirements.txt"]
 
 [workflows]
+runButton = "run Workflow"
 
 [[workflows.workflow]]
 name = "run Workflow"
-mode = "parallel"
-author = 55537756
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "run bot"
-
-[[workflows.workflow]]
-name = "run bot"
 mode = "sequential"
 author = 55537756
 
@@ -28,3 +20,6 @@ args = "python bot.py"
 [[ports]]
 localPort = 10000
 externalPort = 80
+
+[agent]
+expertMode = true
