@@ -102,10 +102,12 @@ async def lifespan(app):
                 logger.warning(f"Warmup untuk {service_name} mengembalikan status {result.status_code}. Respons: {result.text}")
             # Jika result adalah None (kasus Web Auth Helper), tidak melakukan apa-apa karena logging sudah ditangani secara internal.
 
-    await application.initialize()
-    asyncio.create_task(setup_webhook())
+    # 1. Atur semua handler terlebih dahulu
     setup_bot()
-    await application.start()
+    # 2. Inisialisasi aplikasi setelah handler diatur
+    await application.initialize()
+    # 3. Atur webhook setelah aplikasi diinisialisasi
+    await setup_webhook()
     
     # Jalankan warmup setelah bot sepenuhnya dimulai
     asyncio.create_task(warmup_services())
@@ -113,6 +115,6 @@ async def lifespan(app):
     logger.info("Application has started and services are being warmed up.")
     yield
     logger.info("Stopping application lifespan...")
-    await application.stop()
+    # Hapus stop(), tidak diperlukan untuk mode webhook
     await async_client.aclose()
     logger.info("Application has stopped.")
