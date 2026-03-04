@@ -6,5 +6,5 @@ asgiref
 starlette
 httpx
 psycopg2-binary
-fastapi
-python-dotenv
+FastAPI
+dotenv

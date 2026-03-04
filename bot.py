@@ -10,7 +10,12 @@ import psycopg2
 import re
 import httpx
 import asyncio
-import datetime
+from contextlib import asynccontextmanager
+from urllib.parse import urlparse
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, JSONResponse
 from telegram import Update, MessageEntity, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, ContextTypes, filters
 
@@ -61,9 +66,6 @@ except ImportError:
     confirm_delete_handler = None
     logger.warning("Token handlers module not found, token management commands will be disabled.")
 
-# Import fungsi-fungsi handler untuk group approval
-from group_approval import get_handlers as get_group_approval_handlers, cleanup_old_requests
-
 # Import fungsi start_mirror dari start_mirror.py
 from start_mirror import start_mirror
 
@@ -78,13 +80,8 @@ from utils import (
     check_gdrive_token
 )
 
-# Import fungsi lifespan dari lifespan.py (kompatibilitas)
-try:
-    from lifespan import lifespan, trigger_github_warmup
-except ImportError:
-    # Fallback untuk Replit
-    lifespan = None
-    trigger_github_warmup = None
+# Import fungsi lifespan dari lifespan.py
+from lifespan import lifespan, trigger_github_warmup
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -101,9 +98,6 @@ def setup_bot():
     application.bot_data['async_client'] = async_client
     job_queue = application.job_queue
     job_queue.run_repeating(update_progress, interval=POLLING_INTERVAL, first=0)
-    
-    # Schedule cleanup untuk approval requests (setiap hari)
-    job_queue.run_daily(cleanup_old_requests, time=datetime.time(hour=3, minute=0), days=(0, 1, 2, 3, 4, 5, 6))
 
     # Daftarkan semua handler
     conv_handler = ConversationHandler(
@@ -138,40 +132,53 @@ def setup_bot():
     if confirm_delete_handler:
         application.add_handler(CommandHandler("confirm_delete", confirm_delete_handler))
     
-    # Daftarkan handlers untuk group approval
-    for handler in get_group_approval_handlers():
-        application.add_handler(handler)
-    
     logger.info("Bot handlers and job queue have been set up.")
 
 async def setup_webhook():
-    """Menginisialisasi aplikasi dan mengatur webhook (untuk kompatibilitas)."""
-    logger.warning("Webhook setup skipped for Replit polling mode")
+    """Menginisialisasi aplikasi dan mengatur webhook."""
+    try:
+        # Pastikan host tidak memiliki skema http/https untuk menghindari duplikasi
+        clean_host = WEBHOOK_HOST.replace("https://", "").replace("http://", "")
+        url = f"https://{clean_host}/webhook"
+        
+        if await application.bot.set_webhook(url):
+            logger.info(f"Webhook has been set to `{url}`")
+        else:
+            logger.error(f"Failed to set webhook to `{url}`")
+    except Exception as e:
+        logger.error(f"Error during webhook setup: {e}")
 
-# --- Konfigurasi untuk Replit (Polling Mode) ---
+# --- Konfigurasi dan Jalankan Aplikasi ---
 
-async def run_polling():
-    """Run the bot in polling mode."""
-    await application.initialize()
-    await application.start()
-    logger.info("Bot started in polling mode")
-    # Keep the bot running
-    await application.updater.start_polling()
-    # Wait until stopped
-    await asyncio.Future()  # Run forever
+async def webhook(request: Request):
+    """Endpoint webhook untuk menerima pembaruan dari Telegram."""
+    try:
+        update_data = await request.json()
+        update = Update.de_json(update_data, application.bot)
+        await application.process_update(update)
+        return JSONResponse({"status": "ok"})
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return JSONResponse({"status": "error"}, status_code=500)
+
+async def health_check(request: Request):
+    """Endpoint untuk memeriksa status bot."""
+    return JSONResponse({"status": "ok"})
+
+# Definisikan rute dan aplikasi Starlette
+routes = [
+    Route('/health', health_check, methods=['GET']),
+    Route('/webhook', webhook, methods=['POST'])
+]
+app = Starlette(routes=routes, lifespan=lifespan)
 
 # Konfigurasi untuk deployment
 if __name__ == "__main__":
-    import asyncio
+    import uvicorn
     
-    # Setup bot handlers
-    setup_bot()
+    # Render akan mengatur PORT environment variable
+    port = int(os.environ.get("PORT", 10000))
+    host = "0.0.0.0"
     
-    # Run in polling mode
-    try:
-        asyncio.run(run_polling())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Error running bot: {e}")
-        raise
+    print(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

@@ -19,8 +19,10 @@ async def jobs_history_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     # Otorisasi berdasarkan OWNER_ID
     if user.id != OWNER_ID:
-        # Jika user tidak diizinkan, beri pesan di semua jenis chat
-        await update.message.reply_text("❌ Tidak diizinkan.")
+        # Jika user tidak diizinkan, beri pesan hanya di chat pribadi
+        if chat.type == 'private':
+            await update.message.reply_text("🚫 Maaf, Anda tidak diizinkan menggunakan bot ini.")
+        # Di grup, jangan beri respons apa pun (atau bisa beri pesan private)
         return
 
     # Buat keyboard inline untuk memilih worker
