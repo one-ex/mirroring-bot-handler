@@ -7,6 +7,7 @@
 import os
 import re
 import logging
+import httpx
 import psycopg2
 from urllib.parse import urlparse
 from telegram import InlineKeyboardButton
