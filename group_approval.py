@@ -7,6 +7,7 @@ Member baru akan dibatasi hak aksesnya sampai di-approve oleh owner.
 """
 
 import logging
+import re
 from typing import Dict, Optional, Tuple
 from datetime import datetime, timedelta
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
@@ -33,6 +34,23 @@ approval_cache: Dict[int, dict] = {}
 def check_authorization(user_id: int) -> bool:
     """Cek apakah user adalah owner"""
     return user_id == OWNER_ID
+
+
+def escape_markdown(text: str) -> str:
+    """
+    Escape karakter khusus Markdown untuk mencegah parsing error.
+    Karakter yang di-escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    """
+    if not text:
+        return ""
+    
+    # Karakter yang perlu di-escape dengan backslash
+    escape_chars = r'[_*[\]()~`>#+\-=|{}\.!]'
+    
+    # Escape karakter khusus
+    escaped_text = re.sub(escape_chars, r'\\\g<0>', text)
+    
+    return escaped_text
 
 
 async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -116,13 +134,17 @@ async def new_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
+            # Escape karakter Markdown di username dan chat title
+            escaped_username = escape_markdown(username)
+            escaped_chat_title = escape_markdown(chat.title if chat.title else "Unknown")
+            
             try:
                 message = await context.bot.send_message(
                     chat_id=OWNER_ID,
                     text=f"🆕 **Permintaan Join Grup**\n"
-                         f"• User: {username}\n"
+                         f"• User: {escaped_username}\n"
                          f"• ID: `{user_id}`\n"
-                         f"• Grup: {chat.title if chat.title else 'Unknown'}\n"
+                         f"• Grup: {escaped_chat_title}\n"
                          f"• Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                          f"Pilih tindakan:",
                     parse_mode="Markdown",
@@ -230,10 +252,13 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 approval_cache[target_user_id]["approval_time"] = datetime.now()
                 logger.warning(f"Database tidak tersedia, hanya update cache untuk user {target_user_id}")
             
+            # Escape username untuk Markdown
+            escaped_username = escape_markdown(username)
+            
             # Update message owner
             await query.edit_message_text(
                 f"✅ **Approved**\n"
-                f"• User: {username}\n"
+                f"• User: {escaped_username}\n"
                 f"• ID: `{target_user_id}`\n"
                 f"• Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 parse_mode="Markdown"
@@ -280,10 +305,13 @@ async def approval_callback_handler(update: Update, context: ContextTypes.DEFAUL
                 approval_cache[target_user_id]["rejection_time"] = datetime.now()
                 logger.warning(f"Database tidak tersedia, hanya update cache untuk user {target_user_id}")
             
+            # Escape username untuk Markdown
+            escaped_username = escape_markdown(username)
+            
             # Update message owner
             await query.edit_message_text(
                 f"❌ **Rejected**\n"
-                f"• User: {username}\n"
+                f"• User: {escaped_username}\n"
                 f"• ID: `{target_user_id}`\n"
                 f"• Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 parse_mode="Markdown"
@@ -445,7 +473,7 @@ def get_handlers():
     
     return [
         MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member_handler),
-        CallbackQueryHandler(approval_callback_handler, pattern=r"^(approve|reject)_\\d+$"),
+        CallbackQueryHandler(approval_callback_handler, pattern=r"^(approve|reject)_\d+$"),
         CommandHandler("pending_requests", list_pending_requests_handler),
         CommandHandler("approve", approve_command_handler),
         CommandHandler("reject", reject_command_handler),

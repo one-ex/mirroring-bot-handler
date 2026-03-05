@@ -8,6 +8,7 @@
 # def close
 
 import psycopg2
+from psycopg2 import errors
 from psycopg2.extras import RealDictCursor
 from config import DATABASE_URL
 import logging
@@ -26,6 +27,8 @@ class DatabaseManager:
             self.connection = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
             self.connected = True
             logger.info("Koneksi database berhasil")
+            # Buat tabel jika belum ada
+            self.create_tables_if_not_exist()
         except Exception as e:
             logger.error(f"Gagal terhubung ke database: {e}")
             logger.warning("Bot akan berjalan tanpa koneksi database. Beberapa fitur mungkin tidak berfungsi.")
@@ -33,6 +36,60 @@ class DatabaseManager:
             # Jangan raise error, biarkan bot tetap berjalan
             self.connection = None
     
+    def create_tables_if_not_exist(self):
+        """Membuat tabel approval_requests dan approved_users jika belum ada"""
+        if not self.connected or self.connection is None:
+            return
+        
+        try:
+            with self.connection.cursor() as cursor:
+                # Buat tabel approval_requests
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS approval_requests (
+                        id SERIAL PRIMARY KEY,
+                        telegram_user_id BIGINT NOT NULL,
+                        username VARCHAR(255),
+                        chat_id BIGINT NOT NULL,
+                        status VARCHAR(50) NOT NULL DEFAULT 'pending',
+                        request_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                        processed_time TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                        UNIQUE(telegram_user_id, chat_id)
+                    )
+                """)
+                
+                # Buat tabel approved_users
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS approved_users (
+                        id SERIAL PRIMARY KEY,
+                        telegram_user_id BIGINT NOT NULL,
+                        chat_id BIGINT NOT NULL,
+                        approved_time TIMESTAMP NOT NULL DEFAULT NOW(),
+                        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                        UNIQUE(telegram_user_id, chat_id)
+                    )
+                """)
+                
+                # Buat index untuk performa
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_approval_requests_status 
+                    ON approval_requests(status)
+                """)
+                
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_approved_users_user_chat 
+                    ON approved_users(telegram_user_id, chat_id)
+                """)
+                
+                self.connection.commit()
+                logger.info("Tabel approval berhasil dibuat/diverifikasi")
+                
+        except Exception as e:
+            logger.error(f"Gagal membuat tabel approval: {e}")
+            self.connection.rollback()
+            # Jangan raise error, biarkan bot tetap berjalan
+
     def check_gdrive_token(self, user_id: int) -> dict:
         """Memeriksa apakah user memiliki token GDrive"""
         if not self.connected or self.connection is None:
@@ -93,14 +150,36 @@ class DatabaseManager:
             SELECT 1 FROM approved_users 
             WHERE telegram_user_id = %s AND chat_id = %s
         """
-        try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(query, (user_id, chat_id))
-                result = cursor.fetchone()
-                return result is not None
-        except Exception as e:
-            logger.error(f"Error checking approved user {user_id} for chat {chat_id}: {e}")
-            return False
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                with self.connection.cursor() as cursor:
+                    cursor.execute(query, (user_id, chat_id))
+                    result = cursor.fetchone()
+                    return result is not None
+            except errors.UndefinedTable as e:
+                # Tabel tidak ada, coba buat tabel
+                logger.warning(f"Tabel approved_users tidak ditemukan, mencoba membuat tabel (attempt {attempt+1}/{max_retries})")
+                try:
+                    self.create_tables_if_not_exist()
+                    # Setelah membuat tabel, coba lagi
+                    continue
+                except Exception as create_error:
+                    logger.error(f"Gagal membuat tabel: {create_error}")
+                    return False
+            except (errors.InFailedSqlTransaction, errors.InternalError) as e:
+                # Transaction aborted, rollback dan coba lagi
+                logger.warning(f"Transaction aborted, rollback dan coba lagi (attempt {attempt+1}/{max_retries})")
+                self.connection.rollback()
+                continue
+            except Exception as e:
+                logger.error(f"Error checking approved user {user_id} for chat {chat_id}: {e}")
+                self.connection.rollback()
+                return False
+        
+        logger.error(f"Gagal memeriksa approved user {user_id} setelah {max_retries} attempts")
+        return False
 
     def save_approval_request(self, user_id: int, username: str, chat_id: int) -> bool:
         """Menyimpan permintaan approval baru"""
@@ -117,68 +196,62 @@ class DatabaseManager:
             logger.error(f"Gagal reconnect ke database: {conn_error}")
             return False
         
-        # Cek apakah constraint UNIQUE pada (telegram_user_id, chat_id) ada di database
-        check_constraint_query = """
-            SELECT 
-                c.conname as constraint_name,
-                array_agg(a.attname ORDER BY u.attposition) as columns
-            FROM pg_constraint c
-            JOIN pg_class t ON c.conrelid = t.oid
-            JOIN pg_namespace n ON t.relnamespace = n.oid
-            JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS u(attnum, attposition) ON TRUE
-            JOIN pg_attribute a ON a.attnum = u.attnum AND a.attrelid = t.oid
-            WHERE t.relname = 'approval_requests'
-              AND n.nspname = 'public'
-              AND c.contype = 'u'  -- unique constraint
-            GROUP BY c.conname
-            HAVING array_agg(a.attname ORDER BY u.attposition) @> ARRAY['telegram_user_id', 'chat_id']
-               AND array_length(array_agg(a.attname), 1) = 2
-        """
-        
         query = """
             INSERT INTO approval_requests (telegram_user_id, username, chat_id, status, request_time)
             VALUES (%s, %s, %s, 'pending', NOW())
             ON CONFLICT (telegram_user_id, chat_id) 
             DO UPDATE SET username = EXCLUDED.username, request_time = NOW(), status = 'pending'
         """
-        try:
-            with self.connection.cursor() as cursor:
-                # Cek constraint terlebih dahulu
-                cursor.execute(check_constraint_query)
-                constraint_result = cursor.fetchone()
-                constraint_exists = constraint_result is not None
-                
-                if constraint_result:
-                    logger.info(f"Constraint ditemukan: {constraint_result['constraint_name']} pada kolom {constraint_result['columns']}")
-                else:
-                    logger.warning("Constraint UNIQUE(telegram_user_id, chat_id) tidak ditemukan di database!")
-                    # Coba buat constraint jika tidak ada
-                    create_constraint_query = """
-                        ALTER TABLE approval_requests 
-                        ADD CONSTRAINT approval_requests_telegram_user_id_chat_id_unique 
-                        UNIQUE (telegram_user_id, chat_id)
-                    """
-                    try:
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                with self.connection.cursor() as cursor:
+                    cursor.execute(query, (user_id, username, chat_id))
+                    self.connection.commit()
+                    logger.info(f"Approval request saved for user {user_id} in chat {chat_id}")
+                    return True
+            except errors.UndefinedTable as e:
+                # Tabel tidak ada, coba buat tabel
+                logger.warning(f"Tabel approval_requests tidak ditemukan, mencoba membuat tabel (attempt {attempt+1}/{max_retries})")
+                try:
+                    self.create_tables_if_not_exist()
+                    # Setelah membuat tabel, coba lagi
+                    continue
+                except Exception as create_error:
+                    logger.error(f"Gagal membuat tabel: {create_error}")
+                    return False
+            except errors.UniqueViolation as e:
+                # Constraint UNIQUE tidak ada, coba buat constraint
+                logger.warning(f"Constraint UNIQUE tidak ditemukan, mencoba membuat constraint (attempt {attempt+1}/{max_retries})")
+                try:
+                    with self.connection.cursor() as cursor:
+                        create_constraint_query = """
+                            ALTER TABLE approval_requests 
+                            ADD CONSTRAINT approval_requests_telegram_user_id_chat_id_unique 
+                            UNIQUE (telegram_user_id, chat_id)
+                        """
                         cursor.execute(create_constraint_query)
                         self.connection.commit()
                         logger.info("Constraint UNIQUE(telegram_user_id, chat_id) berhasil dibuat")
-                    except Exception as constraint_error:
-                        logger.error(f"Gagal membuat constraint: {constraint_error}")
-                        self.connection.rollback()
-                        return False
-                
-                # Jalankan query insert
-                cursor.execute(query, (user_id, username, chat_id))
-                self.connection.commit()
-                logger.info(f"Approval request saved for user {user_id} in chat {chat_id}")
-                return True
-        except Exception as e:
-            logger.error(f"Error saving approval request for user {user_id}: {e}")
-            # Log query untuk debugging
-            logger.debug(f"Query: {query}")
-            logger.debug(f"Parameters: ({user_id}, {username}, {chat_id})")
-            self.connection.rollback()
-            return False
+                        # Setelah membuat constraint, coba lagi
+                        continue
+                except Exception as constraint_error:
+                    logger.error(f"Gagal membuat constraint: {constraint_error}")
+                    self.connection.rollback()
+                    return False
+            except (errors.InFailedSqlTransaction, errors.InternalError) as e:
+                # Transaction aborted, rollback dan coba lagi
+                logger.warning(f"Transaction aborted, rollback dan coba lagi (attempt {attempt+1}/{max_retries})")
+                self.connection.rollback()
+                continue
+            except Exception as e:
+                logger.error(f"Error saving approval request for user {user_id}: {e}")
+                self.connection.rollback()
+                return False
+        
+        logger.error(f"Gagal menyimpan approval request untuk user {user_id} setelah {max_retries} attempts")
+        return False
 
     def update_approval_status(self, user_id: int, chat_id: int, status: str) -> bool:
         """Update status approval (approved/rejected)"""
