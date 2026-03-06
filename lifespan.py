@@ -62,10 +62,10 @@ async def lifespan(app):
     # 3. Atur webhook setelah aplikasi diinisialisasi
     await setup_webhook()
     
-    # Jalankan warmup setelah bot sepenuhnya dimulai
-    asyncio.create_task(warmup_services())
+    # Jalankan warmup setelah bot sepenuhnya dimulai dan tunggu sampai selesai
+    await warmup_services()
     
-    logger.info("Application has started and services are being warmed up.")
+    logger.info("Application has started and services have been warmed up.")
     yield
     logger.info("Stopping application lifespan...")
     # Hapus stop(), tidak diperlukan untuk mode webhook
