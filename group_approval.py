@@ -465,6 +465,49 @@ async def reject_command_handler(update: Update, context: ContextTypes.DEFAULT_T
     await approval_callback_handler(update, context)
 
 
+async def left_chat_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handler untuk member yang keluar dari grup.
+    
+    Fungsi ini akan:
+    1. Mendeteksi member yang keluar dari grup
+    2. Menghapus user dari tabel approved_users jika ada
+    3. Menghapus dari cache jika ada
+    """
+    try:
+        if not update.message or not update.message.left_chat_member:
+            return
+        
+        chat = update.effective_chat
+        left_member = update.message.left_chat_member
+        user_id = left_member.id
+        username = left_member.username or left_member.first_name or f"User{user_id}"
+        
+        # Skip jika user adalah bot
+        if left_member.is_bot:
+            return
+        
+        logger.info(f"User {username} (ID: {user_id}) keluar dari chat {chat.id} ({chat.title if chat.title else 'Unknown'})")
+        
+        # Hapus approved user dari database
+        if db_manager:
+            deleted = db_manager.remove_approved_user(user_id, chat.id)
+            if deleted:
+                logger.info(f"Approved user {user_id} dihapus dari tabel approved_users untuk chat {chat.id}")
+            else:
+                logger.debug(f"User {user_id} tidak ditemukan di tabel approved_users untuk chat {chat.id}")
+        else:
+            logger.warning("Database tidak tersedia, skip remove approved user")
+        
+        # Hapus dari cache jika ada
+        if user_id in approval_cache:
+            del approval_cache[user_id]
+            logger.debug(f"User {user_id} dihapus dari approval cache")
+    
+    except Exception as e:
+        logger.error(f"Error dalam left_chat_member_handler: {e}")
+
+
 # Fungsi untuk mendapatkan handlers
 def get_handlers():
     """Kembalikan list of handlers untuk didaftarkan di bot.py"""
@@ -473,6 +516,7 @@ def get_handlers():
     
     return [
         MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member_handler),
+        MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left_chat_member_handler),
         CallbackQueryHandler(approval_callback_handler, pattern=r"^(approve|reject)_\d+$"),
         CommandHandler("pending_requests", list_pending_requests_handler),
         CommandHandler("approve", approve_command_handler),

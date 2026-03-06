@@ -51,7 +51,7 @@ async def main():
         # Cleanup
         if application.running:
             await application.stop()
-        if application.initialized:
+        if application._initialized:
             await application.shutdown()
 
 

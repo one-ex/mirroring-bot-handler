@@ -279,6 +279,8 @@ class DatabaseManager:
                     """
                     cursor.execute(insert_query, (user_id, chat_id))
                     self.connection.commit()
+                    # Hapus approval request dari tabel approval_requests setelah disetujui
+                    self.delete_approval_request(user_id, chat_id)
                 
                 logger.info(f"Approval status updated to {status} for user {user_id} in chat {chat_id}")
                 return updated
@@ -328,6 +330,52 @@ class DatabaseManager:
             logger.error(f"Error cleaning up old approval requests: {e}")
             self.connection.rollback()
             return 0
+
+    def remove_approved_user(self, user_id: int, chat_id: int) -> bool:
+        """Menghapus approved user dari tabel approved_users ketika user keluar dari grup"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip remove approved user {user_id} dari chat {chat_id}")
+            return False
+        
+        query = """
+            DELETE FROM approved_users 
+            WHERE telegram_user_id = %s AND chat_id = %s
+        """
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(query, (user_id, chat_id))
+                self.connection.commit()
+                deleted = cursor.rowcount > 0
+                if deleted:
+                    logger.info(f"Approved user {user_id} dihapus dari chat {chat_id} karena keluar dari grup")
+                return deleted
+        except Exception as e:
+            logger.error(f"Error removing approved user {user_id} from chat {chat_id}: {e}")
+            self.connection.rollback()
+            return False
+
+    def delete_approval_request(self, user_id: int, chat_id: int) -> bool:
+        """Menghapus approval request dari tabel approval_requests ketika user sudah disetujui"""
+        if not self.connected or self.connection is None:
+            logger.warning(f"Database tidak tersedia, skip delete approval request untuk user {user_id} di chat {chat_id}")
+            return False
+        
+        query = """
+            DELETE FROM approval_requests 
+            WHERE telegram_user_id = %s AND chat_id = %s
+        """
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(query, (user_id, chat_id))
+                self.connection.commit()
+                deleted = cursor.rowcount > 0
+                if deleted:
+                    logger.info(f"Approval request untuk user {user_id} dihapus dari chat {chat_id} setelah disetujui")
+                return deleted
+        except Exception as e:
+            logger.error(f"Error deleting approval request for user {user_id} in chat {chat_id}: {e}")
+            self.connection.rollback()
+            return False
 
     def close(self):
         """Menutup koneksi database"""
