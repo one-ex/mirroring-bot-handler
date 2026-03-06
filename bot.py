@@ -24,8 +24,6 @@ from config import (
     WEB_AUTH_URL,
     WEBHOOK_HOST,
     OWNER_ID,
-    GITHUB_PAT,
-    GITHUB_REPOSITORY,
     POLLING_INTERVAL,
     SELECTING_ACTION,
     SELECTING_SERVICE
@@ -80,11 +78,10 @@ from utils import (
 
 # Import fungsi lifespan dari lifespan.py (kompatibilitas)
 try:
-    from lifespan import lifespan, trigger_github_warmup
+    from lifespan import lifespan
 except ImportError:
     # Fallback untuk Replit
     lifespan = None
-    trigger_github_warmup = None
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -114,8 +111,8 @@ def setup_bot():
                 CallbackQueryHandler(cancel, pattern=r'^cancel_\d+$'),
             ],
             SELECTING_SERVICE: [
-                CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain|gdrive)_\d+$'),
-                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login_\d+$')
+                CallbackQueryHandler(start_mirror, pattern=r'^(gofile|pixeldrain|gdrive)_\d+$'),
+                CallbackQueryHandler(cancel_gdrive_login, pattern=r'^cancel_gdrive_login_\d+$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
@@ -127,8 +124,8 @@ def setup_bot():
     
     # Handler untuk riwayat jobs
     application.add_handler(CommandHandler("jobs_history", jobs_history_handler))
-    application.add_handler(CallbackQueryHandler(select_worker_handler, pattern='^jobs_(gofile|pixeldrain|gdrive|all)$'))
-    application.add_handler(CallbackQueryHandler(jobs_back_handler, pattern='^jobs_back$'))
+    application.add_handler(CallbackQueryHandler(select_worker_handler, pattern=r'^jobs_(gofile|pixeldrain|gdrive|all)$'))
+    application.add_handler(CallbackQueryHandler(jobs_back_handler, pattern=r'^jobs_back$'))
     
     # Daftarkan handler untuk manajemen token jika tersedia
     if view_tokens_handler:

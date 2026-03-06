@@ -7,8 +7,6 @@
 # WEB_AUTH_URL
 # WEBHOOK_HOST
 # OWNER_ID
-# GITHUB_PAT
-# GITHUB_REPOSITORY
 # POLLING_INTERVAL
 # SELECTING_ACTION
 # SELECTING_SERVICE
@@ -43,10 +41,6 @@ if OWNER_ID:
     OWNER_ID = int(OWNER_ID)
 else:
     OWNER_ID = 0  # Nilai default yang tidak mungkin menjadi ID user valid
-
-# Komponen WarmUp
-GITHUB_PAT = os.getenv('GITHUB_PAT')
-GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
 POLLING_INTERVAL = 2  # Detik
 

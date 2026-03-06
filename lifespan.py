@@ -1,5 +1,4 @@
 # Daftar Isi Variable
-# async def trigger_github_warmup
 # async def lifespan
 
 import asyncio
@@ -7,36 +6,9 @@ import httpx
 import logging
 from contextlib import asynccontextmanager
 
-from config import GITHUB_PAT, GITHUB_REPOSITORY, GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, WEB_AUTH_URL
+from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, WEB_AUTH_URL
 
 logger = logging.getLogger(__name__)
-
-async def trigger_github_warmup(url: str):
-    """Memicu GitHub Action untuk melakukan warmup pada URL yang diberikan."""
-    from bot import async_client
-    if not GITHUB_PAT or not GITHUB_REPOSITORY:
-        logger.warning("GITHUB_PAT atau GITHUB_REPOSITORY tidak diatur. Warmup via GitHub dilewati.")
-        return
-
-    api_url = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/actions/workflows/warmup.yml/dispatches"
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": f"token {GITHUB_PAT}",
-    }
-    data = {
-        "ref": "master",  # Menggunakan 'master' karena lebih umum untuk repositori lama
-        "inputs": {"url": url}
-    }
-    
-    logger.info(f"Memicu GitHub Action untuk warmup: {url}")
-    try:
-        response = await async_client.post(api_url, headers=headers, json=data, timeout=30)
-        if response.status_code == 204:
-            logger.info(f"Berhasil memicu GitHub Action untuk warmup {url}.")
-        else:
-            logger.error(f"Gagal memicu GitHub Action. Status: {response.status_code}, Respons: {response.text}")
-    except Exception as e:
-        logger.error(f"Error saat memicu GitHub Action: {e}")
 
 @asynccontextmanager
 async def lifespan(app):
@@ -50,34 +22,16 @@ async def lifespan(app):
         services_to_warmup = {
             "GoFile": GOFILE_API_URL,
             "PixelDrain": PIXELDRAIN_API_URL,
-            "Google Drive": GDRIVE_API_URL,
-            "Web Auth Helper": WEB_AUTH_URL
+            "Google Drive": GDRIVE_API_URL
         }
         
         warmup_tasks = []
         for service_name, base_url in services_to_warmup.items():
             if base_url:
-                if service_name == "Web Auth Helper":
-                    # Coba akses langsung URL Web Auth Helper terlebih dahulu
-                    try:
-                        # Gunakan endpoint /warmup jika tersedia, jika tidak coba akses root
-                        warmup_url = f"{base_url}"
-                        direct_response = await async_client.get(warmup_url, timeout=30)
-                        if direct_response.status_code == 200:
-                            logger.info(f"Web Auth Helper langsung dapat diakses di {warmup_url}. Warmup via GitHub dilewati.")
-                            continue  # Skip GitHub warmup
-                        else:
-                            logger.warning(f"Akses langsung ke Web Auth Helper gagal dengan status {direct_response.status_code}. Akan coba via GitHub.")
-                    except Exception as e:
-                        logger.warning(f"Tidak dapat mengakses Web Auth Helper langsung: {e}. Akan coba via GitHub.")
-                    
-                    # Jika akses langsung gagal, gunakan GitHub Actions untuk warmup Web Auth Helper
-                    warmup_tasks.append(trigger_github_warmup(base_url))
-                else:
-                    # Untuk layanan lain, gunakan endpoint /warmup
-                    warmup_url = f"{base_url}/warmup"
-                    warmup_tasks.append(async_client.post(warmup_url, timeout=60))
-                    logger.info(f"Warming up {service_name} at {warmup_url}...")
+                # Untuk layanan lain, gunakan endpoint /warmup
+                warmup_url = f"{base_url}/warmup"
+                warmup_tasks.append(async_client.post(warmup_url, timeout=60))
+                logger.info(f"Warming up {service_name} at {warmup_url}...")
             else:
                 logger.warning(f"URL untuk layanan {service_name} tidak diatur, warmup dilewati.")
 
@@ -100,7 +54,6 @@ async def lifespan(app):
             # Tambahkan pengecekan untuk memastikan 'result' tidak None
             elif result:
                 logger.warning(f"Warmup untuk {service_name} mengembalikan status {result.status_code}. Respons: {result.text}")
-            # Jika result adalah None (kasus Web Auth Helper), tidak melakukan apa-apa karena logging sudah ditangani secara internal.
 
     # 1. Atur semua handler terlebih dahulu
     setup_bot()
