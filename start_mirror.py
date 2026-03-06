@@ -95,13 +95,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         except:
                             pass
                         
-                    # Kirim pesan dashboard baru di bawah pesan URL terakhir
+                    # Kirim pesan dashboard baru tanpa men-tag pesan URL user
                     username = query.from_user.username or f"ID: {query.from_user.id}"
-                    url_message_id = context.user_data.get('url_message_id')
                     new_message = await bot.send_message(
                         chat_id=chat_id,
-                        text=f"📊 Dashboard Jobs User: {username}",
-                        reply_to_message_id=url_message_id
+                        text=f"📊 Dashboard Jobs User: {username}"
                     )
                     message_id = new_message.message_id
                     
@@ -174,13 +172,11 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 except:
                     pass
                 
-            # Kirim pesan dashboard baru di bawah pesan URL terakhir
+            # Kirim pesan dashboard baru tanpa men-tag pesan URL user
             username = query.from_user.username or f"ID: {query.from_user.id}"
-            url_message_id = context.user_data.get('url_message_id')
             new_message = await bot.send_message(
                 chat_id=chat_id,
-                text=f"📊 Dashboard Jobs User: {username}",
-                reply_to_message_id=url_message_id
+                text=f"📊 Dashboard Jobs User: {username}"
             )
             message_id = new_message.message_id
             
