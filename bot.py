@@ -110,12 +110,12 @@ def setup_bot():
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, url_handler)],
         states={
             SELECTING_ACTION: [
-                CallbackQueryHandler(select_service, pattern='^continue$'),
-                CallbackQueryHandler(cancel, pattern='^cancel$'),
+                CallbackQueryHandler(select_service, pattern=r'^continue_\d+$'),
+                CallbackQueryHandler(cancel, pattern=r'^cancel_\d+$'),
             ],
             SELECTING_SERVICE: [
-                CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain|gdrive)$'),
-                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login$')
+                CallbackQueryHandler(start_mirror, pattern='^(gofile|pixeldrain|gdrive)_\d+$'),
+                CallbackQueryHandler(cancel_gdrive_login, pattern='^cancel_gdrive_login_\d+$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],

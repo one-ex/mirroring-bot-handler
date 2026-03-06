@@ -17,14 +17,28 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     from bot import async_client, application
     bot = context.bot
     query = update.callback_query
-    service = query.data
+    callback_data = query.data
+    
+    # Ekstrak service dan user_id dari callback_data
+    if '_' not in callback_data:
+        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+        return SELECTING_SERVICE
+    
+    try:
+        service_part, user_id_str = callback_data.split('_')
+        expected_user_id = int(user_id_str)
+    except (ValueError, IndexError):
+        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+        return SELECTING_SERVICE
+    
+    service = service_part
     url = context.user_data.get('url')
     user_id = query.from_user.id
 
     await query.answer()
 
-    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
-    if user_id != context.user_data.get('user_id'):
+    # Verifikasi bahwa user yang mengklik adalah user yang sesuai
+    if user_id != expected_user_id:
         await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
         return SELECTING_SERVICE
 
@@ -38,7 +52,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             login_url = f"{WEB_AUTH_URL}/login?user_id={user_id}"
             keyboard = [
                 [InlineKeyboardButton("🔐 Login via Google", url=login_url)],
-                [InlineKeyboardButton("❌ Batal", callback_data='cancel_gdrive_login')]
+                [InlineKeyboardButton("❌ Batal", callback_data=f'cancel_gdrive_login_{user_id}')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(

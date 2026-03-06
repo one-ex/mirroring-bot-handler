@@ -15,3 +15,4 @@ verify_approval_changes.py
 mirroring-bot-handler.tar.gz
 .env.example
 README_REPLIT.md
+test_callback_fix.py

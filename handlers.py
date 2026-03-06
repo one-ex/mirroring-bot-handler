@@ -80,8 +80,8 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['user_id'] = user.id
 
     keyboard = [
-        [InlineKeyboardButton("✅ Lanjutkan", callback_data='continue'),
-         InlineKeyboardButton("❌ Batal", callback_data='cancel')]
+        [InlineKeyboardButton("✅ Lanjutkan", callback_data=f'continue_{user.id}'),
+         InlineKeyboardButton("❌ Batal", callback_data=f'cancel_{user.id}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -101,15 +101,30 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
 
-    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
-    if query.from_user.id != context.user_data.get('user_id'):
+    # Ekstrak user_id dari callback_data
+    callback_data = query.data
+    if not callback_data.startswith('continue_'):
+        return SELECTING_ACTION
+    
+    try:
+        _, user_id_str = callback_data.split('_')
+        expected_user_id = int(user_id_str)
+    except (ValueError, IndexError):
+        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+        return SELECTING_ACTION
+
+    # Verifikasi bahwa user yang mengklik adalah user yang sesuai
+    if query.from_user.id != expected_user_id:
         await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
         return SELECTING_ACTION
 
+    # Simpan user_id di context.user_data untuk verifikasi selanjutnya
+    context.user_data['user_id'] = expected_user_id
+
     keyboard = [
-        [InlineKeyboardButton("📁 GoFile", callback_data='gofile'),
-         InlineKeyboardButton("💧 PixelDrain", callback_data='pixeldrain')],
-        [InlineKeyboardButton("☁️ Google Drive", callback_data='gdrive')]
+        [InlineKeyboardButton("📁 GoFile", callback_data=f'gofile_{expected_user_id}'),
+         InlineKeyboardButton("💧 PixelDrain", callback_data=f'pixeldrain_{expected_user_id}')],
+        [InlineKeyboardButton("☁️ Google Drive", callback_data=f'gdrive_{expected_user_id}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -122,10 +137,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
     query = update.callback_query
     if query:
-        # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
-        if query.from_user.id != context.user_data.get('user_id'):
+        # Ekstrak user_id dari callback_data
+        callback_data = query.data
+        if not callback_data.startswith('cancel_'):
+            return SELECTING_ACTION
+        
+        try:
+            _, user_id_str = callback_data.split('_')
+            expected_user_id = int(user_id_str)
+        except (ValueError, IndexError):
+            await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+            return SELECTING_ACTION
+
+        # Verifikasi bahwa user yang mengklik adalah user yang sesuai
+        if query.from_user.id != expected_user_id:
             await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
             return SELECTING_ACTION
+        
         await query.answer()
         await query.edit_message_text(text="🚫 Permintaan dibatalkan.")
     else:
@@ -137,10 +165,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def cancel_gdrive_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan proses login GDrive."""
     query = update.callback_query
-    # Verifikasi bahwa user yang mengklik adalah user yang sama dengan yang mengirim URL
-    if query.from_user.id != context.user_data.get('user_id'):
+    # Ekstrak user_id dari callback_data
+    callback_data = query.data
+    if not callback_data.startswith('cancel_gdrive_login_'):
+        return SELECTING_SERVICE
+    
+    try:
+        _, user_id_str = callback_data.split('_')
+        expected_user_id = int(user_id_str)
+    except (ValueError, IndexError):
+        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+        return SELECTING_SERVICE
+
+    # Verifikasi bahwa user yang mengklik adalah user yang sesuai
+    if query.from_user.id != expected_user_id:
         await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
         return SELECTING_SERVICE
+    
     await query.answer()
     await query.edit_message_text("Login Google Drive dibatalkan.")
     context.user_data.clear()
