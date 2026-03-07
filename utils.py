@@ -72,8 +72,10 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     download_url = status_info.get('download_url')
 
     # Handle finished jobs with the new simple format
+    username = job_info.get('username', 'N/A')
     if status in ['Completed', 'Sukses']:
         text = (
+            f"👤 **User:** @{username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
@@ -85,6 +87,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
         text = (
+            f"👤 **User:** @{username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** {status.capitalize()} ❌"
         )
@@ -93,6 +96,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     # Handle status 'cancelling' as active job
     if status.lower() == 'cancelling':
         text = (
+            f"👤 **User:** @{username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"💾 **Size:** `{size}`\n"
             f"⚙️ **Status:** Cancelling ⏳\n"
@@ -112,6 +116,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
+        f"👤  **User:** @{username}\n\n"
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
         f"⚙️  **Status:** `{status}`\n"

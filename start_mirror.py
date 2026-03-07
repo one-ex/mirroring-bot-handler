@@ -80,36 +80,32 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     if 'active_mirrors' not in context.bot_data:
                         context.bot_data['active_mirrors'] = {}
 
-                    existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+                    # Cari pekerjaan yang sudah ada untuk user ini
+                    existing_jobs_for_user = [j for j in context.bot_data['active_mirrors'].values() 
+                                                if j.get('user_id', j['chat_id']) == user_id]
+                    
                     # Hapus pesan selection agar tidak mengacaukan urutan
                     try:
                         await query.message.delete()
                     except:
                         pass
                     
-                    # Hapus pesan dashboard lama jika ada
-                    if existing_jobs:
-                        old_message_id = existing_jobs[0]['message_id']
-                        try:
-                            await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
-                        except:
-                            pass
-                        
-                    # Kirim pesan dashboard baru tanpa men-tag pesan URL user
-                    username = query.from_user.username or f"ID: {query.from_user.id}"
-                    new_message = await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"📊 Dashboard Jobs User: {username}"
-                    )
-                    message_id = new_message.message_id
+                    # Jika user sudah memiliki dashboard, gunakan message_id yang sama
+                    if existing_jobs_for_user:
+                        message_id = existing_jobs_for_user[0]['message_id']
+                    else:
+                        # Kirim pesan dashboard baru untuk user ini
+                        username = query.from_user.username or f"ID: {query.from_user.id}"
+                        new_message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=f"📊 Dashboard Jobs User: @{username}"
+                        )
+                        message_id = new_message.message_id
                     
-                    # Perbarui message_id untuk semua job lama di chat yang sama
-                    for job_id_old, job_info in context.bot_data['active_mirrors'].items():
-                        if job_info['chat_id'] == chat_id:
-                            context.bot_data['active_mirrors'][job_id_old]['message_id'] = message_id
-
+                    # Simpan informasi pekerjaan dengan user_id
                     context.bot_data['active_mirrors'][job_id] = {
                         'chat_id': chat_id,
+                        'user_id': user_id,  # Tambahkan user_id
                         'message_id': message_id,
                         'file_info': context.user_data['file_info'],
                         'service': 'gdrive',
@@ -150,44 +146,37 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             job_id = result['job_id']
             
             # Create or get the progress message
-            # If user has other active jobs, use the existing message.
             chat_id = query.message.chat_id
-            progress_message = None
             
             if 'active_mirrors' not in context.bot_data:
                 context.bot_data['active_mirrors'] = {}
 
-            existing_jobs = [j for j in context.bot_data['active_mirrors'].values() if j['chat_id'] == chat_id]
+            # Cari pekerjaan yang sudah ada untuk user ini
+            existing_jobs_for_user = [j for j in context.bot_data['active_mirrors'].values() 
+                                    if j.get('user_id', j['chat_id']) == user_id]
+            
             # Hapus pesan selection agar tidak mengacaukan urutan
             try:
                 await query.message.delete()
             except:
                 pass
             
-            # Hapus pesan dashboard lama jika ada
-            if existing_jobs:
-                old_message_id = existing_jobs[0]['message_id']
-                try:
-                    await bot.delete_message(chat_id=chat_id, message_id=old_message_id)
-                except:
-                    pass
-                
-            # Kirim pesan dashboard baru tanpa men-tag pesan URL user
-            username = query.from_user.username or f"ID: {query.from_user.id}"
-            new_message = await bot.send_message(
-                chat_id=chat_id,
-                text=f"📊 Dashboard Jobs User: {username}"
-            )
-            message_id = new_message.message_id
+            # Jika user sudah memiliki dashboard, gunakan message_id yang sama
+            if existing_jobs_for_user:
+                message_id = existing_jobs_for_user[0]['message_id']
+            else:
+                # Kirim pesan dashboard baru untuk user ini
+                username = query.from_user.username or f"ID: {query.from_user.id}"
+                new_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"👤  **User:** @{username}\n\n📊 **Dashboard Jobs"
+                )
+                message_id = new_message.message_id
             
-            # Perbarui message_id untuk semua job lama di chat yang sama
-            for job_id_old, job_info in context.bot_data['active_mirrors'].items():
-                if job_info['chat_id'] == chat_id:
-                    context.bot_data['active_mirrors'][job_id_old]['message_id'] = message_id
-
-            # Store job info
+            # Store job info dengan user_id
             context.bot_data['active_mirrors'][job_id] = {
                 'chat_id': chat_id,
+                'user_id': user_id,  # Tambahkan user_id
                 'message_id': message_id,
                 'file_info': context.user_data['file_info'],
                 'service': service,
