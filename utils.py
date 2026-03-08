@@ -71,11 +71,14 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     eta = status_info.get('estimasi', 0)
     download_url = status_info.get('download_url')
     username = job_info.get('username', 'N/A')
+    user_id = job_info.get('user_id', job_info.get('chat_id'))
 
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
+        # Gunakan mention Telegram jika user_id tersedia
+        mention_text = f"[{username}](tg://user?id={user_id})" if user_id and username != 'N/A' else f"`@{username}`"
         text = (
-            f"📝 **Jobs User:** `@{username}`\n\n"
+            f"📝 **Jobs User:** {mention_text}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
@@ -86,8 +89,10 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         return {"text": text, "keyboard": keyboard}
 
     if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
+        # Gunakan mention Telegram jika user_id tersedia
+        mention_text = f"[{username}](tg://user?id={user_id})" if user_id and username != 'N/A' else f"`@{username}`"
         text = (
-            f"📝 **Jobs User:** `@{username}`\n\n"
+            f"📝 **Jobs User:** {mention_text}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** {status.capitalize()} ❌"
         )
