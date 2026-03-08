@@ -70,10 +70,12 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     speed = status_info.get('speed_mbps', 0)
     eta = status_info.get('estimasi', 0)
     download_url = status_info.get('download_url')
+    username = job_info.get('username', 'N/A')
 
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         text = (
+            f"📝 **Jobs User:** `@{username}`\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
@@ -85,6 +87,7 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
 
     if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
         text = (
+            f"📝 **Jobs User:** `@{username}`\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** {status.capitalize()} ❌"
         )
@@ -101,7 +104,6 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         return {"text": text, "keyboard": []}
 
     # Handle active jobs with the detailed dashboard format
-    username = job_info.get('username', 'N/A')
     file_name_truncated = full_file_name
     if len(file_name_truncated) > 25:
         file_name_truncated = file_name_truncated[:17] + "..."
