@@ -106,9 +106,17 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     finished_jobs_to_remove = []
 
     for job_id, job_info in list(context.bot_data['active_mirrors'].items()):
-        user_id = job_info.get('user_id', job_info['chat_id'])  # Fallback to chat_id if user_id not present
+        user_id = job_info.get('user_id', job_info['chat_id'])
+        chat_id = job_info['chat_id']
+        
+        # Pastikan setiap user memiliki entry di jobs_by_user
         if user_id not in jobs_by_user:
-            jobs_by_user[user_id] = {'jobs': [], 'message_id': job_info['message_id']}
+            jobs_by_user[user_id] = {'jobs': [], 'message_id': job_info['message_id'], 'chat_id': chat_id, 'username': job_info.get('username', 'N/A')}
+        else:
+            # Pastikan message_id konsisten untuk user yang sama di chat yang sama
+            # Jika ada perbedaan, gunakan yang pertama ditemukan (seharusnya sama)
+            if jobs_by_user[user_id]['message_id'] != job_info['message_id']:
+                logger.warning(f"Warning: Different message_id for user {user_id} in chat {chat_id}. Using first found: {jobs_by_user[user_id]['message_id']}")
         
         status_info = all_statuses.get(job_id)
         
@@ -144,7 +152,7 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             confirmation_message_id = job_info.get('confirmation_message_id')
             if confirmation_message_id:
                 try:
-                    await bot.delete_message(chat_id=job_info['chat_id'], message_id=confirmation_message_id)
+                    await bot.delete_message(chat_id=chat_id, message_id=confirmation_message_id)
                 except Exception as e:
                     logger.warning(f"Failed to delete confirmation message {confirmation_message_id}: {e}")
 
@@ -154,14 +162,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             try:
                 await send_with_exponential_backoff(
                     bot=bot,
-                    chat_id=job_info['chat_id'],
+                    chat_id=chat_id,
                     text=final_message_data['text'],
                     parse_mode='Markdown',
                     disable_web_page_preview=True,
                     reply_markup=reply_markup
                 )
             except Exception as e:
-                logger.error(f"Failed to send final status for job {job_id} to chat {job_info['chat_id']}: {e}")
+                logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
         else:
             # If the job is still active, add it to the dashboard update list
             jobs_by_user[user_id]['jobs'].append({'job_info': job_info, 'status_info': status_info})
@@ -170,6 +178,8 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     for user_id, user_data in jobs_by_user.items():
         active_jobs = user_data['jobs']
         message_id = user_data['message_id']
+        chat_id = user_data['chat_id']
+        username = user_data.get('username', 'N/A')
         
         full_text = ""
         all_keyboards = []
@@ -178,10 +188,8 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
             full_text = "🏁 Semua pekerjaan selesai."
             reply_markup = None
         else:
-            # Ambil username dari user_id (semua pekerjaan untuk user ini seharusnya memiliki username yang sama)
-            # Gunakan username dari pekerjaan pertama sebagai fallback
-            username = active_jobs[0]['job_info'].get('username', 'N/A')
-            full_text = f"📊 **Dashboard Jobs User:** `@{username}`\n\n"
+            # Gunakan username yang sudah disimpan
+            full_text = f"\n\n📊 **Dashboard Jobs User:** `@{username}`\n\n"
             for i, j in enumerate(active_jobs):
                 progress_data = format_job_progress(j['job_info'], j['status_info'])
                 full_text += progress_data['text']
@@ -195,49 +203,45 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Get the last known state for this dashboard to avoid API spam
         if 'dashboard_state' not in context.bot_data:
             context.bot_data['dashboard_state'] = {}
-        last_text = context.bot_data['dashboard_state'].get(user_id)
+        dashboard_key = f"{chat_id}:{user_id}"
+        last_text = context.bot_data['dashboard_state'].get(dashboard_key)
 
         # Only edit if the content has changed
         if last_text != full_text:
             try:
-                # Get chat_id from first job
-                chat_id = active_jobs[0]['job_info']['chat_id'] if active_jobs else None
-                if chat_id:
-                    await bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=full_text,
-                        reply_markup=reply_markup,
-                        parse_mode='Markdown',
-                        disable_web_page_preview=True
-                    )
-                    # Update the state after successful edit
-                    context.bot_data['dashboard_state'][user_id] = full_text
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=full_text,
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+                # Update the state after successful edit
+                context.bot_data['dashboard_state'][dashboard_key] = full_text
             except Exception as e:
                 error_str = str(e)
                 if "Message to edit not found" in error_str:
-                    # Pesan dashboard hilang, kirim pesan baru dan perbarui semua job untuk user ini
+                    # Pesan dashboard hilang, kirim pesan baru dan perbarui semua job di user ini
                     try:
-                        chat_id = active_jobs[0]['job_info']['chat_id'] if active_jobs else None
-                        if chat_id:
-                            new_message = await send_with_exponential_backoff(
-                                bot=bot,
-                                chat_id=chat_id,
-                                text=full_text,
-                                reply_markup=reply_markup,
-                                parse_mode='Markdown',
-                                disable_web_page_preview=True
-                            )
-                            new_message_id = new_message.message_id
-                            # Perbarui message_id untuk semua job untuk user ini
-                            for job_id_old, job_info in context.bot_data['active_mirrors'].items():
-                                if job_info.get('user_id', job_info['chat_id']) == user_id:
-                                    context.bot_data['active_mirrors'][job_id_old]['message_id'] = new_message_id
-                            # Update dashboard state
-                            context.bot_data['dashboard_state'][user_id] = full_text
-                            logger.info(f"Dashboard message for user {user_id} was missing, created new one with message_id {new_message_id}")
+                        new_message = await send_with_exponential_backoff(
+                            bot=bot,
+                            chat_id=chat_id,
+                            text=full_text,
+                            reply_markup=reply_markup,
+                            parse_mode='Markdown',
+                            disable_web_page_preview=True
+                        )
+                        new_message_id = new_message.message_id
+                        # Perbarui message_id untuk semua job di user ini
+                        for job_id_old, job_info in context.bot_data['active_mirrors'].items():
+                            if job_info.get('user_id', job_info['chat_id']) == user_id and job_info['chat_id'] == chat_id:
+                                context.bot_data['active_mirrors'][job_id_old]['message_id'] = new_message_id
+                        # Update dashboard state
+                        context.bot_data['dashboard_state'][dashboard_key] = full_text
+                        logger.info(f"Dashboard message for user {user_id} in chat {chat_id} was missing, created new one with message_id {new_message_id}")
                     except Exception as e2:
-                        logger.error(f"Failed to create new dashboard for user {user_id}: {e2}")
+                        logger.error(f"Failed to create new dashboard for user {user_id} in chat {chat_id}: {e2}")
                 elif "Flood control exceeded" in error_str or "Retry after" in error_str.lower():
                     # Tangani error flood control dengan menunggu dan mencoba lagi
                     try:
@@ -246,26 +250,24 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                         wait_match = re.search(r'Retry in (\d+) seconds', error_str)
                         wait_seconds = int(wait_match.group(1)) if wait_match else 5
                         
-                        logger.warning(f"Flood control for user {user_id}, waiting {wait_seconds} seconds before retry")
+                        logger.warning(f"Flood control for user {user_id} in chat {chat_id}, waiting {wait_seconds} seconds before retry")
                         await asyncio.sleep(wait_seconds)
                         
                         # Coba edit lagi
-                        chat_id = active_jobs[0]['job_info']['chat_id'] if active_jobs else None
-                        if chat_id:
-                            await bot.edit_message_text(
-                                chat_id=chat_id,
-                                message_id=message_id,
-                                text=full_text,
-                                reply_markup=reply_markup,
-                                parse_mode='Markdown',
-                                disable_web_page_preview=True
-                            )
-                            context.bot_data['dashboard_state'][user_id] = full_text
-                            logger.info(f"Successfully edited dashboard for user {user_id} after flood control wait")
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=full_text,
+                            reply_markup=reply_markup,
+                            parse_mode='Markdown',
+                            disable_web_page_preview=True
+                        )
+                        context.bot_data['dashboard_state'][dashboard_key] = full_text
+                        logger.info(f"Successfully edited dashboard for user {user_id} in chat {chat_id} after flood control wait")
                     except Exception as e2:
-                        logger.warning(f"Failed to edit dashboard for user {user_id} even after flood control wait: {e2}")
+                        logger.warning(f"Failed to edit dashboard for user {user_id} in chat {chat_id} even after flood control wait: {e2}")
                 else:
-                    logger.warning(f"Failed to edit dashboard for user {user_id}: {e}")
+                    logger.warning(f"Failed to edit dashboard for user {user_id} in chat {chat_id}: {e}")
 
     # Clean up finished jobs from the active list
     for job_id in finished_jobs_to_remove:
@@ -274,10 +276,16 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Also clean up dashboard state for users with no active jobs
     if 'dashboard_state' in context.bot_data:
-        active_user_ids = {job_info.get('user_id', job_info['chat_id']) for job_info in context.bot_data['active_mirrors'].values()}
-        stale_user_ids = [user_id for user_id in context.bot_data['dashboard_state'] if user_id not in active_user_ids]
-        for user_id in stale_user_ids:
-            del context.bot_data['dashboard_state'][user_id]
+        active_dashboard_keys = []
+        for job in context.bot_data['active_mirrors'].values():
+            user_id = job.get('user_id', job['chat_id'])
+            chat_id = job['chat_id']
+            active_dashboard_keys.append(f"{chat_id}:{user_id}")
+        
+        active_dashboard_keys = set(active_dashboard_keys)
+        stale_dashboard_keys = [key for key in context.bot_data['dashboard_state'] if key not in active_dashboard_keys]
+        for key in stale_dashboard_keys:
+            del context.bot_data['dashboard_state'][key]
 
     # Hentikan poller jika tidak ada lagi pekerjaan aktif
     if not context.bot_data.get('active_mirrors'):

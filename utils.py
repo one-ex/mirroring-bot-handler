@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 # Import variabel konfigurasi yang diperlukan
 from config import DATABASE_URL
 
+def escape_markdown(text: str) -> str:
+    """
+    Escape karakter khusus Markdown untuk mencegah parsing error.
+    Karakter yang di-escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    """
+    if not text:
+        return ""
+    
+    # Karakter yang perlu di-escape dengan backslash
+    escape_chars = r'[_*[\]()~`>#+\-=|{}\.!]'
+    
+    # Escape karakter khusus
+    escaped_text = re.sub(escape_chars, r'\\\g<0>', text)
+    
+    return escaped_text
+
 async def get_file_info_from_url(url: str) -> dict:
     """Makes a request to get file info without downloading the whole file."""
     # Import async_client di dalam fungsi untuk menghindari circular import
@@ -72,10 +88,16 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     download_url = status_info.get('download_url')
 
     # Handle finished jobs with the new simple format
-    username = job_info.get('username', 'N/A')
     if status in ['Completed', 'Sukses']:
+        username = job_info.get('username', 'N/A')
+        # Format username untuk tag
+        if username.startswith('ID: '):
+            tag_username = username  # Jika hanya ID, tampilkan apa adanya
+        else:
+            tag_username = f"@{username}" if username != 'N/A' else username
+        
         text = (
-            f"👤 **User:** @{username}\n\n"
+            f"📝 **Jobs User:** {tag_username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"⚙️ **Status:** Completed ✅\n"
         )
@@ -86,21 +108,34 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
         return {"text": text, "keyboard": keyboard}
 
     if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
+        username = job_info.get('username', 'N/A')
+        # Format username untuk tag
+        if username.startswith('ID: '):
+            tag_username = username  # Jika hanya ID, tampilkan apa adanya
+        else:
+            tag_username = f"@{username}" if username != 'N/A' else username
+        
         text = (
-            f"👤 **User:** @{username}\n\n"
+            f"📝 **Jobs User:** {tag_username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
-            f"⚙️ **Status:** {status.capitalize()} ❌"
+            f"⚙️ **Status:** {status.capitalize()} ❌\n"
         )
         return {"text": text, "keyboard": []}
 
     # Handle status 'cancelling' as active job
     if status.lower() == 'cancelling':
+        username = job_info.get('username', 'N/A')
+        # Format username untuk tag
+        if username.startswith('ID: '):
+            tag_username = username  # Jika hanya ID, tampilkan apa adanya
+        else:
+            tag_username = f"@{username}" if username != 'N/A' else username
+        
         text = (
-            f"👤 **User:** @{username}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
             f"💾 **Size:** `{size}`\n"
             f"⚙️ **Status:** Cancelling ⏳\n"
-            f"🔄 Sedang membatalkan proses mirroring..."
+            f"🔄 Sedang membatalkan proses mirroring...\n"
         )
         return {"text": text, "keyboard": []}
 
@@ -116,7 +151,6 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
     text = (
-        f"👤  **User:** @{username}\n\n"
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
         f"⚙️  **Status:** `{status}`\n"

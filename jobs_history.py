@@ -249,7 +249,7 @@ async def display_jobs_list(query, jobs, worker_name, failed_workers=None):
     if len(text) > 4096:
         text = text[:4000] + "\n\n... (pesan dipotong karena terlalu panjang)"
     
-    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown', disable_web_page_preview=True)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML', disable_web_page_preview=True)
 
 async def jobs_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler untuk kembali ke pilihan worker."""
@@ -294,5 +294,5 @@ async def jobs_back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "📊 **Riwayat Jobs**\n\n"
         "Pilih worker yang ingin dilihat riwayat jobs-nya:",
         reply_markup=reply_markup,
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )

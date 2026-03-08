@@ -80,9 +80,9 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     if 'active_mirrors' not in context.bot_data:
                         context.bot_data['active_mirrors'] = {}
 
-                    # Cari pekerjaan yang sudah ada untuk user ini
+                    # Cari pekerjaan yang sudah ada untuk user ini di chat yang sama
                     existing_jobs_for_user = [j for j in context.bot_data['active_mirrors'].values() 
-                                                if j.get('user_id', j['chat_id']) == user_id]
+                                            if j.get('user_id', j['chat_id']) == user_id and j['chat_id'] == chat_id]
                     
                     # Hapus pesan selection agar tidak mengacaukan urutan
                     try:
@@ -90,9 +90,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     except:
                         pass
                     
-                    # Jika user sudah memiliki dashboard, gunakan message_id yang sama
+                    # Jika user sudah memiliki dashboard di chat ini, gunakan message_id yang sama
                     if existing_jobs_for_user:
                         message_id = existing_jobs_for_user[0]['message_id']
+                        logger.info(f"Using existing dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}")
                     else:
                         # Kirim pesan dashboard baru untuk user ini
                         username = query.from_user.username or f"ID: {query.from_user.id}"
@@ -101,6 +102,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                             text=f"📊 Dashboard Jobs User: @{username}"
                         )
                         message_id = new_message.message_id
+                        logger.info(f"Created new dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}, username: {username}")
                     
                     # Simpan informasi pekerjaan dengan user_id
                     context.bot_data['active_mirrors'][job_id] = {
@@ -111,6 +113,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         'service': 'gdrive',
                         'username': query.from_user.username or f"ID: {query.from_user.id}"
                     }
+                    logger.info(f"Saved job {job_id} for user {user_id} in chat {chat_id}")
                     
                     # Mulai poller jika belum berjalan
                     if not application.job_queue.get_jobs_by_name('update_progress'):
@@ -121,6 +124,8 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                             name='update_progress'
                         )
                         logger.info("Polling job 'update_progress' started.")
+                    else:
+                        logger.info("Polling job 'update_progress' already running")
                 else:
                     await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
 
@@ -146,14 +151,15 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             job_id = result['job_id']
             
             # Create or get the progress message
+            # If user has other active jobs, use the existing message.
             chat_id = query.message.chat_id
             
             if 'active_mirrors' not in context.bot_data:
                 context.bot_data['active_mirrors'] = {}
 
-            # Cari pekerjaan yang sudah ada untuk user ini
+            # Cari pekerjaan yang sudah ada untuk user ini di chat yang sama
             existing_jobs_for_user = [j for j in context.bot_data['active_mirrors'].values() 
-                                    if j.get('user_id', j['chat_id']) == user_id]
+                                    if j.get('user_id', j['chat_id']) == user_id and j['chat_id'] == chat_id]
             
             # Hapus pesan selection agar tidak mengacaukan urutan
             try:
@@ -161,17 +167,19 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             except:
                 pass
             
-            # Jika user sudah memiliki dashboard, gunakan message_id yang sama
+            # Jika user sudah memiliki dashboard di chat ini, gunakan message_id yang sama
             if existing_jobs_for_user:
                 message_id = existing_jobs_for_user[0]['message_id']
+                logger.info(f"Using existing dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}")
             else:
                 # Kirim pesan dashboard baru untuk user ini
                 username = query.from_user.username or f"ID: {query.from_user.id}"
                 new_message = await bot.send_message(
                     chat_id=chat_id,
-                    text=f"👤  **User:** @{username}\n\n📊 **Dashboard Jobs"
+                    text=f"📊 Dashboard Jobs User: @{username}"
                 )
                 message_id = new_message.message_id
+                logger.info(f"Created new dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}, username: {username}")
             
             # Store job info dengan user_id
             context.bot_data['active_mirrors'][job_id] = {
@@ -182,6 +190,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 'service': service,
                 'username': query.from_user.username or f"ID: {query.from_user.id}"
             }
+            logger.info(f"Saved job {job_id} for user {user_id} in chat {chat_id}")
             
             # Mulai poller jika belum berjalan
             if not application.job_queue.get_jobs_by_name('update_progress'):
@@ -192,6 +201,8 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     name='update_progress'
                 )
                 logger.info("Polling job 'update_progress' started.")
+            else:
+                logger.info("Polling job 'update_progress' already running")
             
         else:
             await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
