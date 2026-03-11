@@ -107,8 +107,9 @@ def setup_bot():
         entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, url_handler)],
         states={
             SELECTING_ACTION: [
-                CallbackQueryHandler(select_service, pattern=r'^continue_\d+$'),
+                CallbackQueryHandler(select_service, pattern=r'^mirroring_\d+$'),
                 CallbackQueryHandler(cancel, pattern=r'^cancel_\d+$'),
+                CallbackQueryHandler(handle_create_fw, pattern=r'^create_fw_\d+$'),
             ],
             SELECTING_SERVICE: [
                 CallbackQueryHandler(start_mirror, pattern=r'^(gofile|pixeldrain|gdrive)_\d+$'),

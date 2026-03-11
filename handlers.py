@@ -80,8 +80,9 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['user_id'] = user.id
 
     keyboard = [
-        [InlineKeyboardButton("✅ Lanjutkan", callback_data=f'continue_{user.id}'),
-         InlineKeyboardButton("❌ Batal", callback_data=f'cancel_{user.id}')]
+        [InlineKeyboardButton("Mirroring", callback_data=f'mirroring_{user.id}'),
+         InlineKeyboardButton("Create FW", callback_data=f'create_fw_{user.id}'),
+         InlineKeyboardButton("Batal", callback_data=f'cancel_{user.id}')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -89,7 +90,7 @@ async def url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         f"📜 **Info File:**\n"
         f"**Nama:** `{info['filename']}`\n"
         f"**Ukuran:** `{info['formatted_size']}`\n\n"
-        f"Lanjutkan proses mirroring?",
+        f"Pilih Layanan",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -103,7 +104,7 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Ekstrak user_id dari callback_data
     callback_data = query.data
-    if not callback_data.startswith('continue_'):
+    if not callback_data.startswith('mirroring_'):
         return SELECTING_ACTION
     
     try:
@@ -132,6 +133,32 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         text="Pilih layanan tujuan:", reply_markup=reply_markup
     )
     return SELECTING_SERVICE
+
+async def handle_create_fw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Menangani tombol Create FW."""
+    query = update.callback_query
+    await query.answer()
+
+    # Ekstrak user_id dari callback_data
+    callback_data = query.data
+    if not callback_data.startswith('create_fw_'):
+        return SELECTING_ACTION
+    
+    try:
+        _, user_id_str = callback_data.split('_')
+        expected_user_id = int(user_id_str)
+    except (ValueError, IndexError):
+        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
+        return SELECTING_ACTION
+
+    # Verifikasi bahwa user yang mengklik adalah user yang sesuai
+    if query.from_user.id != expected_user_id:
+        await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
+        return SELECTING_ACTION
+
+    await query.edit_message_text("⚠️ Fitur Create FW belum tersedia. Silakan coba lagi nanti.")
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""
