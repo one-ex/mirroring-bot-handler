@@ -26,7 +26,8 @@ from config import (
     OWNER_ID,
     POLLING_INTERVAL,
     SELECTING_ACTION,
-    SELECTING_SERVICE
+    SELECTING_MIRROR_SERVICE,
+    SELECTING_CREATE_FW_SERVICE
 )
 
 # Import fungsi-fungsi handler dari handlers.py
@@ -34,6 +35,8 @@ from handlers import (
     start,
     url_handler,
     select_service,
+    handle_create_fw,
+    start_create_fw,
     cancel,
     cancel_gdrive_login,
     stop_mirror_command_handler
@@ -111,9 +114,13 @@ def setup_bot():
                 CallbackQueryHandler(cancel, pattern=r'^cancel_\d+$'),
                 CallbackQueryHandler(handle_create_fw, pattern=r'^create_fw_\d+$'),
             ],
-            SELECTING_SERVICE: [
+            SELECTING_MIRROR_SERVICE: [
                 CallbackQueryHandler(start_mirror, pattern=r'^(gofile|pixeldrain|gdrive)_\d+$'),
                 CallbackQueryHandler(cancel_gdrive_login, pattern=r'^cancel_gdrive_login_\d+$')
+            ],
+            SELECTING_CREATE_FW_SERVICE: [
+                CallbackQueryHandler(start_create_fw, pattern=r'^createfw_(gofile|pixeldrain|gdrive)_\d+$'),
+                CallbackQueryHandler(cancel, pattern=r'^cancel_\d+$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],

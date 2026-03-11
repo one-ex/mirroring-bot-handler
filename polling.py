@@ -10,7 +10,7 @@ import time
 from telegram.ext import ContextTypes
 from telegram import InlineKeyboardMarkup
 
-from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
+from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, HUGGINGFACE_API_URL
 from utils import format_job_progress
 
 logger = logging.getLogger(__name__)
@@ -81,10 +81,14 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
         if not base_url: continue
         tasks.append(async_client.get(f"{base_url}/status/all", timeout=10))
 
+    # Tambahkan task untuk mengambil status dari worker Hugging Face untuk job Create FW
+    if HUGGINGFACE_API_URL:
+        tasks.append(async_client.get(f"{HUGGINGFACE_API_URL}/api/status/all", timeout=10))
+
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for i, result in enumerate(results):
-        service = list(service_urls.keys())[i]
+        service = list(service_urls.keys())[i] if i < len(service_urls) else 'huggingface'
         if isinstance(result, httpx.RequestError):
             logger.warning(f"Could not fetch status from {service}: {result}")
         elif isinstance(result, Exception):
