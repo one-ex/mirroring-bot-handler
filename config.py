@@ -30,7 +30,7 @@ if not TELEGRAM_TOKEN:
 GOFILE_API_URL = os.getenv('GOFILE_API_URL')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL')
 GDRIVE_API_URL = os.getenv('GDRIVE_API_URL')
-HUGGINGFACE_API_URL = os.getenv('HUGGINGFACE_API_URL', 'https://huggingface.co/spaces/exball/xiaomi-firmware-creator')
+HUGGINGFACE_API_URL = os.getenv('HUGGINGFACE_API_URL')
 DATABASE_URL = os.getenv('DATABASE_URL')
 WEB_AUTH_URL = os.getenv('WEB_AUTH_URL')
 WEBHOOK_HOST = os.getenv('WEBHOOK_HOST')
