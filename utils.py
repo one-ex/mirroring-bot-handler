@@ -72,17 +72,15 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     download_url = status_info.get('download_url')
     username = job_info.get('username', 'N/A')
     user_id = job_info.get('user_id', job_info.get('chat_id'))
-    create_fw = job_info.get('create_fw', False)
 
     # Handle finished jobs with the new simple format
     if status in ['Completed', 'Sukses']:
         # Gunakan mention Telegram jika user_id tersedia
         mention_text = f"[{username}](tg://user?id={user_id})" if user_id and username != 'N/A' else f"`@{username}`"
-        job_type = "Create FW" if create_fw else "Mirroring"
         text = (
             f"📝 **Jobs User:** {mention_text}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
-            f"⚙️ **Status:** {job_type} Completed ✅\n"
+            f"⚙️ **Status:** Completed ✅\n"
         )
         keyboard = []
         if download_url:
@@ -93,22 +91,20 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     if status.lower() in ['failed', 'cancelled', 'gagal', 'dibatalkan']:
         # Gunakan mention Telegram jika user_id tersedia
         mention_text = f"[{username}](tg://user?id={user_id})" if user_id and username != 'N/A' else f"`@{username}`"
-        job_type = "Create FW" if create_fw else "Mirroring"
         text = (
             f"📝 **Jobs User:** {mention_text}\n\n"
             f"📄 **File Name:** `{full_file_name}`\n"
-            f"⚙️ **Status:** {job_type} {status.capitalize()} ❌"
+            f"⚙️ **Status:** {status.capitalize()} ❌"
         )
         return {"text": text, "keyboard": []}
 
     # Handle status 'cancelling' as active job
     if status.lower() == 'cancelling':
-        job_type = "Create FW" if create_fw else "Mirroring"
         text = (
             f"📄 **File Name:** `{full_file_name}`\n"
             f"💾 **Size:** `{size}`\n"
-            f"⚙️ **Status:** {job_type} Cancelling ⏳\n"
-            f"🔄 Sedang membatalkan proses {job_type.lower()}..."
+            f"⚙️ **Status:** Cancelling ⏳\n"
+            f"🔄 Sedang membatalkan proses mirroring..."
         )
         return {"text": text, "keyboard": []}
 
@@ -122,18 +118,10 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
 
-    job_type = "Create FW" if create_fw else "Mirroring"
-    
-    # Tentukan teks status berdasarkan job_type
-    if create_fw:
-        status_display = f"{job_type}: {status}"
-    else:
-        status_display = status
-
     text = (
         f"📄  **File Name:** `{file_name_truncated}`\n"
         f"💾  **Size:** `{size}`\n"
-        f"⚙️  **Status:** `{status_display}`\n"
+        f"⚙️  **Status:** `{status}`\n"
         f"〚{bar}〛**{progress:.1f}%**\n"
         f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
         f"⏳  **Estimation:** `{eta} Sec`\n"

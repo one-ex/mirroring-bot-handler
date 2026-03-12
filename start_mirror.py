@@ -6,7 +6,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import WEB_AUTH_URL, GDRIVE_API_URL, GOFILE_API_URL, PIXELDRAIN_API_URL, POLLING_INTERVAL, SELECTING_MIRROR_SERVICE
+from config import WEB_AUTH_URL, GDRIVE_API_URL, GOFILE_API_URL, PIXELDRAIN_API_URL, POLLING_INTERVAL, SELECTING_SERVICE
 from utils import check_gdrive_token
 from polling import update_progress
 
@@ -22,14 +22,14 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Ekstrak service dan user_id dari callback_data
     if '_' not in callback_data:
         await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
-        return SELECTING_MIRROR_SERVICE
+        return SELECTING_SERVICE
     
     try:
         service_part, user_id_str = callback_data.split('_')
         expected_user_id = int(user_id_str)
     except (ValueError, IndexError):
         await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
-        return SELECTING_MIRROR_SERVICE
+        return SELECTING_SERVICE
     
     service = service_part
     url = context.user_data.get('url')
@@ -40,7 +40,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Verifikasi bahwa user yang mengklik adalah user yang sesuai
     if user_id != expected_user_id:
         await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
-        return SELECTING_MIRROR_SERVICE
+        return SELECTING_SERVICE
 
     if service == 'gdrive':
         if not WEB_AUTH_URL:
@@ -59,7 +59,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 text="Anda belum login ke Google Drive. Silakan login untuk melanjutkan.",
                 reply_markup=reply_markup
             )
-            return SELECTING_MIRROR_SERVICE # Tetap di state ini untuk menunggu pembatalan
+            return SELECTING_SERVICE # Tetap di state ini untuk menunggu pembatalan
         else:
             # TODO: Implement GDrive mirror start logic
             await query.edit_message_text("Memulai proses mirror ke Google Drive...")
