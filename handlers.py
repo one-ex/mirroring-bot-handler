@@ -14,6 +14,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import OWNER_ID, SELECTING_ACTION, SELECTING_SERVICE, GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL
 from utils import get_file_info_from_url
+from create_fw_handlers import handle_create_fw, handle_create_fw_server
 
 logger = logging.getLogger(__name__)
 
@@ -134,31 +135,7 @@ async def select_service(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
     return SELECTING_SERVICE
 
-async def handle_create_fw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Menangani tombol Create FW."""
-    query = update.callback_query
-    await query.answer()
 
-    # Ekstrak user_id dari callback_data
-    callback_data = query.data
-    if not callback_data.startswith('create_fw_'):
-        return SELECTING_ACTION
-    
-    try:
-        _, user_id_str = callback_data.split('_')
-        expected_user_id = int(user_id_str)
-    except (ValueError, IndexError):
-        await query.answer("🚫 Format callback data tidak valid.", show_alert=True)
-        return SELECTING_ACTION
-
-    # Verifikasi bahwa user yang mengklik adalah user yang sesuai
-    if query.from_user.id != expected_user_id:
-        await query.answer("🚫 Anda tidak diizinkan mengklik tombol ini.", show_alert=True)
-        return SELECTING_ACTION
-
-    await query.edit_message_text("⚠️ Fitur Create FW belum tersedia. Silakan coba lagi nanti.")
-    context.user_data.clear()
-    return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Membatalkan alur."""

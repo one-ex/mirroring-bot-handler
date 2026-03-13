@@ -28,6 +28,7 @@ from config import (
     SELECTING_ACTION,
     SELECTING_SERVICE
 )
+from create_fw_handlers import handle_create_fw, handle_create_fw_server
 
 # Import fungsi-fungsi handler dari handlers.py
 from handlers import (
@@ -113,7 +114,8 @@ def setup_bot():
             ],
             SELECTING_SERVICE: [
                 CallbackQueryHandler(start_mirror, pattern=r'^(gofile|pixeldrain|gdrive)_\d+$'),
-                CallbackQueryHandler(cancel_gdrive_login, pattern=r'^cancel_gdrive_login_\d+$')
+                CallbackQueryHandler(cancel_gdrive_login, pattern=r'^cancel_gdrive_login_\d+$'),
+                CallbackQueryHandler(handle_create_fw_server, pattern=r'^create_fw_(gofile|pixeldrain|gdrive)_\d+$')
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
