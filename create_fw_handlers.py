@@ -165,14 +165,27 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
         
         # Panggil worker mirroring untuk mengupload firmware
         try:
-            mirror_payload = {
-                "url": firmware_url,
-                "user_id": user_id,
-                "username": query.from_user.username or f"ID: {user_id}"
-            }
+            # Untuk GoFile dan PixelDrain, gunakan payload sederhana
+            if server in ['gofile', 'pixeldrain']:
+                mirror_payload = {
+                    "url": firmware_url
+                }
+            # Untuk Google Drive, tambahkan user_id
+            elif server == 'gdrive':
+                mirror_payload = {
+                    "url": firmware_url,
+                    "user_id": str(user_id)
+                }
+            else:
+                await query.edit_message_text(
+                    f"❌ **Server tidak valid**\n\n"
+                    f"Server: {server}",
+                    parse_mode='Markdown'
+                )
+                return ConversationHandler.END
             
-            logger.info(f"Mengirim request ke {mirror_api_url} dengan payload {mirror_payload}")
-            mirror_response = requests.post(mirror_api_url, json=mirror_payload, timeout=60)
+            logger.info(f"Mengirim request ke {mirror_api_url}/mirror dengan payload {mirror_payload}")
+            mirror_response = requests.post(f"{mirror_api_url}/mirror", json=mirror_payload, timeout=60)
             
             if mirror_response.status_code != 200:
                 await query.edit_message_text(
@@ -185,7 +198,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
             
             mirror_result = mirror_response.json()
             
-            if mirror_result.get('status') != 'success':
+            if mirror_result.get('status') != 'success' and not mirror_result.get('success'):
                 error_msg = mirror_result.get('error', 'Unknown error')
                 await query.edit_message_text(
                     f"❌ **Gagal mengupload firmware ke {server_name}**\n\n"
@@ -195,8 +208,13 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
                 )
                 return ConversationHandler.END
             
-            download_url = mirror_result.get('download_url')
-            file_name = mirror_result.get('file_name', 'firmware.zip')
+            # Handle different response formats
+            if mirror_result.get('success'):
+                download_url = mirror_result.get('download_url')
+                file_name = mirror_result.get('file_name', 'firmware.zip')
+            else:
+                download_url = mirror_result.get('download_url')
+                file_name = mirror_result.get('file_name', 'firmware.zip')
             
             await query.edit_message_text(
                 f"🎉 **Firmware Berhasil Diupload!**\n\n"
