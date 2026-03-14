@@ -6,6 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 import requests
 from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, SELECTING_SERVICE
+from polling import update_progress
 
 logger = logging.getLogger(__name__)
 
@@ -161,59 +162,106 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
         status_url = result.get('status_url', f"{CREATE_FW_API_URL}/status/{job_id}")
         firmware_download_path = result.get('download_url', f"{CREATE_FW_API_URL}/download/{job_id}")
         
+        # Simpan informasi job ke context.bot_data untuk progress dashboard
+        from bot import application
+        
+        # Cek apakah user sudah memiliki dashboard
+        existing_jobs_for_user = []
+        user_id = query.from_user.id
+        chat_id = query.message.chat_id
+        
+        if 'active_mirrors' in context.bot_data:
+            for jid, job_info in context.bot_data['active_mirrors'].items():
+                if job_info.get('user_id', job_info['chat_id']) == user_id and job_info['chat_id'] == chat_id:
+                    existing_jobs_for_user.append(job_info)
+        
+        if existing_jobs_for_user:
+            message_id = existing_jobs_for_user[0]['message_id']
+            logger.info(f"Using existing dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}")
+        else:
+            # Kirim pesan dashboard baru untuk user ini
+            username = query.from_user.username or f"ID: {query.from_user.id}"
+            new_message = await query.message.reply_text(
+                f"📊 **Dashboard Jobs User:** `@{username}`\n\n"
+                f"🚀 **Memulai Create Firmware**\n"
+                f"• URL ROM: `{url}`\n"
+                f"• Server Upload: {server_name}\n"
+                f"• Job ID: `{job_id}`\n\n"
+                f"⏳ Silakan tunggu, proses sedang dimulai...",
+                parse_mode='Markdown'
+            )
+            message_id = new_message.message_id
+            logger.info(f"Created new dashboard for user {user_id} in chat {chat_id}, message_id: {message_id}, username: {username}")
+        
+        # Simpan job info untuk progress dashboard
+        if 'active_mirrors' not in context.bot_data:
+            context.bot_data['active_mirrors'] = {}
+        
+        context.bot_data['active_mirrors'][job_id] = {
+            'chat_id': chat_id,
+            'user_id': user_id,
+            'message_id': message_id,
+            'file_info': {
+                'filename': url.split('/')[-1],
+                'formatted_size': 'N/A',
+                'size_bytes': 0
+            },
+            'service': 'create_fw',
+            'worker': 'xiaomi-firmware-creator',
+            'username': query.from_user.username or f"ID: {query.from_user.id}",
+            'create_fw_server': server,
+            'create_fw_server_name': server_name,
+            'mirror_api_url': mirror_api_url,
+            'firmware_download_path': firmware_download_path,
+            'status_url': status_url
+        }
+        
+        # Mulai poller jika belum berjalan
+        if not application.job_queue.get_jobs_by_name('update_progress'):
+            application.job_queue.run_repeating(
+                update_progress,
+                interval=2,
+                first=1,
+                name='update_progress'
+            )
+            logger.info("Started polling job 'update_progress' for Create FW")
+        
         # Kirim pesan bahwa proses sedang berjalan dengan job_id
         await query.edit_message_text(
-            f"⏳ **Proses Create Firmware Sedang Berjalan**\n\n"
+            f"🚀 **Create Firmware Dimulai**\n\n"
             f"• URL ROM: `{url}`\n"
             f"• Server Upload: {server_name}\n"
             f"• Job ID: `{job_id}`\n\n"
-            f"⏳ Silakan tunggu, proses pembuatan firmware sedang berjalan...\n"
-            f"Anda dapat memantau status dengan: `{status_url}`",
+            f"📊 Progress dapat dilihat di dashboard di atas.",
             parse_mode='Markdown'
         )
         
-        # Pantau status job sampai selesai
-        max_attempts = 300  # 300 * 2 detik = 10 menit
-        for attempt in range(max_attempts):
-            try:
-                status_response = requests.get(status_url, timeout=10)
-                if status_response.status_code == 200:
-                    status_data = status_response.json()
-                    current_status = status_data.get('status', 'unknown')
-                    
-                    if current_status == 'completed':
-                        # Dapatkan URL download dari status data
-                        firmware_download_url = status_data.get('download_url', firmware_download_path)
-                        context.user_data['firmware_url'] = firmware_download_url
-                        
-                        await query.edit_message_text(
-                            f"✅ **Firmware Berhasil Dibuat**\n\n"
-                            f"• Job ID: `{job_id}`\n"
-                            f"• Server Upload: {server_name}\n\n"
-                            f"⏳ Mengirim firmware ke worker {server_name} untuk diupload...",
-                            parse_mode='Markdown'
-                        )
-                        break
-                    elif current_status in ['failed', 'cancelled']:
-                        error_msg = status_data.get('error', 'Process failed')
-                        await query.edit_message_text(
-                            f"❌ **Gagal membuat firmware**\n\n"
-                            f"• Job ID: `{job_id}`\n"
-                            f"• Error: {escape_markdown(str(error_msg))}\n\n"
-                            f"Status: {current_status}",
-                            parse_mode='Markdown'
-                        )
-                        return ConversationHandler.END
-                    # Jika masih berjalan, tunggu 2 detik sebelum cek lagi
-                    await asyncio.sleep(2)
-                else:
-                    logger.warning(f"Status check failed with status code {status_response.status_code}")
-                    await asyncio.sleep(2)
-            except Exception as e:
-                logger.error(f"Error checking status: {e}")
-                await asyncio.sleep(2)
-        else:
-            # Timeout setelah max_attempts
+        # Proses Create FW akan dipantau oleh polling job 'update_progress'
+        # yang akan mengambil status dari endpoint /status/all worker xiaomi-firmware-creator
+        # dan menampilkan progress dashboard seperti mirroring job biasa
+        
+        # Tunggu hingga job selesai (completed, failed, atau cancelled)
+        # Polling job akan menangani tampilan progress
+        max_wait_seconds = 600  # 10 menit
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_seconds:
+            await asyncio.sleep(2)
+            
+            # Cek status job dari bot_data
+            if job_id not in context.bot_data.get('active_mirrors', {}):
+                # Job telah dihapus dari active_mirrors (berarti selesai)
+                break
+                
+            job_info = context.bot_data['active_mirrors'][job_id]
+            if job_info.get('manually_cancelled', False):
+                # Job dibatalkan manual
+                break
+        
+        # Setelah keluar dari loop, cek apakah firmware berhasil dibuat
+        if job_id in context.bot_data.get('active_mirrors', {}):
+            # Job masih ada di active_mirrors (mungkin timeout)
+            del context.bot_data['active_mirrors'][job_id]
             await query.edit_message_text(
                 f"⏰ **Timeout**\n\n"
                 f"• Job ID: `{job_id}`\n"
@@ -223,17 +271,47 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
             )
             return ConversationHandler.END
         
+        # Tunggu firmware URL tersedia dari status job
+        firmware_url = None
+        max_wait_firmware = 30  # 30 detik
+        wait_start = time.time()
+        
+        while time.time() - wait_start < max_wait_firmware:
+            # Cek status job untuk mendapatkan firmware_download_url
+            try:
+                status_response = requests.get(status_url, timeout=10)
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    if status_data.get('status') == 'completed':
+                        firmware_url = status_data.get('firmware_download_url', firmware_download_path)
+                        break
+            except Exception as e:
+                logger.warning(f"Error checking firmware status: {e}")
+            
+            await asyncio.sleep(2)
+        
+        if not firmware_url:
+            await query.edit_message_text(
+                f"❌ **Gagal mendapatkan URL firmware**\n\n"
+                f"• Job ID: `{job_id}`\n"
+                f"• Tidak dapat mendapatkan URL download firmware setelah menunggu.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
+        context.user_data['firmware_url'] = firmware_url
+        
         # Panggil worker mirroring untuk mengupload firmware
         try:
             # Untuk GoFile dan PixelDrain, gunakan payload sederhana
             if server in ['gofile', 'pixeldrain']:
                 mirror_payload = {
-                    "url": context.user_data['firmware_url']
+                    "url": firmware_url
                 }
             # Untuk Google Drive, tambahkan user_id
             elif server == 'gdrive':
                 mirror_payload = {
-                    "url": context.user_data['firmware_url'],
+                    "url": firmware_url,
                     "user_id": str(user_id)
                 }
             else:
