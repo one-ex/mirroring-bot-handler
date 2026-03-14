@@ -1,9 +1,11 @@
 import os
 import logging
-import requests
+import time
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
-from config import SELECTING_ACTION, SELECTING_SERVICE
+import requests
+from config import GOFILE_API_URL, PIXELDRAIN_API_URL, GDRIVE_API_URL, SELECTING_SERVICE
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +14,17 @@ CREATE_FW_API_URL = os.getenv('CREATE_FW_API_URL', 'https://exball-xiaomi-firmwa
 GOFILE_API_URL = os.getenv('GOFILE_API_URL', 'https://one-ex-mirroring-to-gofile.hf.space')
 PIXELDRAIN_API_URL = os.getenv('PIXELDRAIN_API_URL', 'https://one-ex-mirroring-to-pixeldrain.hf.space')
 GDRIVE_API_URL = os.getenv('GDRIVE_API_URL', 'https://one-ex-mirroring-to-gdrive.hf.space')
+
+# Fungsi untuk escape karakter Markdown
+def escape_markdown(text):
+    """Escape karakter khusus Markdown untuk menghindari parsing error."""
+    if not text:
+        return text
+    # Karakter yang perlu di-escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
 
 async def handle_create_fw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Menangani tombol Create FW - menampilkan pilihan server cloud upload."""
@@ -22,13 +35,13 @@ async def handle_create_fw(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     callback_data = query.data
     user_id = int(callback_data.split('_')[-1])
     if query.from_user.id != user_id:
-        await query.edit_message_text("❌ Anda tidak memiliki izin untuk menggunakan tombol ini.")
+        await query.edit_message_text(escape_markdown("❌ Anda tidak memiliki izin untuk menggunakan tombol ini."))
         return ConversationHandler.END
     
     # Simpan URL yang dikirim user (dari context)
     user_data = context.user_data
     if 'url' not in user_data:
-        await query.edit_message_text("❌ URL tidak ditemukan. Silakan kirim URL lagi.")
+        await query.edit_message_text(escape_markdown("❌ URL tidak ditemukan. Silakan kirim URL lagi."))
         return ConversationHandler.END
     
     url = user_data['url']
@@ -65,7 +78,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
     callback_data = query.data
     user_id = int(callback_data.split('_')[-1])
     if query.from_user.id != user_id:
-        await query.edit_message_text("❌ Anda tidak memiliki izin untuk menggunakan tombol ini.")
+        await query.edit_message_text(escape_markdown("❌ Anda tidak memiliki izin untuk menggunakan tombol ini."))
         return ConversationHandler.END
     
     # Identifikasi server yang dipilih
@@ -82,7 +95,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
         server_name = 'Google Drive'
         mirror_api_url = GDRIVE_API_URL
     else:
-        await query.edit_message_text("❌ Server tidak valid.")
+        await query.edit_message_text(escape_markdown("❌ Server tidak valid."))
         return ConversationHandler.END
     
     # Simpan informasi server ke user_data
@@ -93,7 +106,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
     # Dapatkan URL dari user_data
     url = context.user_data.get('url')
     if not url:
-        await query.edit_message_text("❌ URL tidak ditemukan. Silakan kirim URL lagi.")
+        await query.edit_message_text(escape_markdown("❌ URL tidak ditemukan. Silakan kirim URL lagi."))
         return ConversationHandler.END
     
     # Kirim pesan bahwa proses sedang dimulai
@@ -118,7 +131,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
             await query.edit_message_text(
                 f"❌ **Gagal menghubungi worker firmware creator**\n\n"
                 f"Status code: {response.status_code}\n"
-                f"Response: {response.text}",
+                f"Response: {escape_markdown(response.text)}",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
@@ -129,51 +142,98 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
         # Debug: Tampilkan semua key dalam respons
         logger.info(f"Keys dalam respons: {list(result.keys())}")
         
-        # Worker Hugging Face mengembalikan struktur berbeda
-        # Respons mengandung 'download_url', 'message', 'rom_url', 'status_url'
-        # 'download_url' adalah path relatif seperti '/download'
-        
-        # Cek jika ada download_url untuk menentukan keberhasilan
-        if not result.get('download_url'):
+        # Worker baru mengembalikan struktur dengan job_id, status_url, dan download_url
+        # Cek jika ada job_id untuk menentukan keberhasilan
+        if not result.get('job_id'):
             # Tampilkan respons lengkap untuk debugging
             logger.error(f"Respons tidak valid dari worker: {result}")
             error_msg = result.get('error', 'Unknown error')
             await query.edit_message_text(
                 f"❌ **Gagal membuat firmware**\n\n"
-                f"Error: {error_msg}\n"
-                f"Response: {result}",
+                f"Error: {escape_markdown(str(error_msg))}\n"
+                f"Response: {escape_markdown(str(result))}",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
-        # Bangun URL firmware lengkap dari download_url relatif
-        base_url = CREATE_FW_API_URL.rstrip('/')
-        download_path = result['download_url'].lstrip('/')
-        firmware_url = f"{base_url}/{download_path}"
+        # Simpan job_id untuk monitoring status
+        job_id = result['job_id']
+        status_url = result.get('status_url', f"{CREATE_FW_API_URL}/status/{job_id}")
+        firmware_download_path = result.get('download_url', f"{CREATE_FW_API_URL}/download/{job_id}")
         
-        # Simpan firmware_url untuk proses upload
-        context.user_data['firmware_url'] = firmware_url
-        
-        # Kirim pesan bahwa firmware berhasil dibuat
+        # Kirim pesan bahwa proses sedang berjalan dengan job_id
         await query.edit_message_text(
-            f"✅ **Firmware Berhasil Dibuat**\n\n"
-            f"• URL Firmware: `{firmware_url}`\n"
-            f"• Server Upload: {server_name}\n\n"
-            f"⏳ Mengirim firmware ke worker {server_name} untuk diupload...",
+            f"⏳ **Proses Create Firmware Sedang Berjalan**\n\n"
+            f"• URL ROM: `{url}`\n"
+            f"• Server Upload: {server_name}\n"
+            f"• Job ID: `{job_id}`\n\n"
+            f"⏳ Silakan tunggu, proses pembuatan firmware sedang berjalan...\n"
+            f"Anda dapat memantau status dengan: `{status_url}`",
             parse_mode='Markdown'
         )
+        
+        # Pantau status job sampai selesai
+        max_attempts = 300  # 300 * 2 detik = 10 menit
+        for attempt in range(max_attempts):
+            try:
+                status_response = requests.get(status_url, timeout=10)
+                if status_response.status_code == 200:
+                    status_data = status_response.json()
+                    current_status = status_data.get('status', 'unknown')
+                    
+                    if current_status == 'completed':
+                        # Dapatkan URL download dari status data
+                        firmware_download_url = status_data.get('download_url', firmware_download_path)
+                        context.user_data['firmware_url'] = firmware_download_url
+                        
+                        await query.edit_message_text(
+                            f"✅ **Firmware Berhasil Dibuat**\n\n"
+                            f"• Job ID: `{job_id}`\n"
+                            f"• Server Upload: {server_name}\n\n"
+                            f"⏳ Mengirim firmware ke worker {server_name} untuk diupload...",
+                            parse_mode='Markdown'
+                        )
+                        break
+                    elif current_status in ['failed', 'cancelled']:
+                        error_msg = status_data.get('error', 'Process failed')
+                        await query.edit_message_text(
+                            f"❌ **Gagal membuat firmware**\n\n"
+                            f"• Job ID: `{job_id}`\n"
+                            f"• Error: {escape_markdown(str(error_msg))}\n\n"
+                            f"Status: {current_status}",
+                            parse_mode='Markdown'
+                        )
+                        return ConversationHandler.END
+                    # Jika masih berjalan, tunggu 2 detik sebelum cek lagi
+                    await asyncio.sleep(2)
+                else:
+                    logger.warning(f"Status check failed with status code {status_response.status_code}")
+                    await asyncio.sleep(2)
+            except Exception as e:
+                logger.error(f"Error checking status: {e}")
+                await asyncio.sleep(2)
+        else:
+            # Timeout setelah max_attempts
+            await query.edit_message_text(
+                f"⏰ **Timeout**\n\n"
+                f"• Job ID: `{job_id}`\n"
+                f"• Proses pembuatan firmware memakan waktu terlalu lama.\n"
+                f"Silakan coba lagi nanti atau periksa status manual di: {status_url}",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
         
         # Panggil worker mirroring untuk mengupload firmware
         try:
             # Untuk GoFile dan PixelDrain, gunakan payload sederhana
             if server in ['gofile', 'pixeldrain']:
                 mirror_payload = {
-                    "url": firmware_url
+                    "url": context.user_data['firmware_url']
                 }
             # Untuk Google Drive, tambahkan user_id
             elif server == 'gdrive':
                 mirror_payload = {
-                    "url": firmware_url,
+                    "url": context.user_data['firmware_url'],
                     "user_id": str(user_id)
                 }
             else:
@@ -191,7 +251,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
                 await query.edit_message_text(
                     f"❌ **Gagal menghubungi worker {server_name}**\n\n"
                     f"Status code: {mirror_response.status_code}\n"
-                    f"Response: {mirror_response.text}",
+                    f"Response: {escape_markdown(mirror_response.text)}",
                     parse_mode='Markdown'
                 )
                 return ConversationHandler.END
@@ -202,35 +262,35 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
                 error_msg = mirror_result.get('error', 'Unknown error')
                 await query.edit_message_text(
                     f"❌ **Gagal mengupload firmware ke {server_name}**\n\n"
-                    f"Error: {error_msg}\n\n"
-                    f"URL firmware: `{firmware_url}`",
+                    f"Error: {escape_markdown(str(error_msg))}\n\n"
+                    f"URL firmware: `{context.user_data['firmware_url']}`",
                     parse_mode='Markdown'
                 )
                 return ConversationHandler.END
             
             # Handle different response formats
             if mirror_result.get('success'):
-                download_url = mirror_result.get('download_url')
+                mirror_download_url = mirror_result.get('download_url')
                 file_name = mirror_result.get('file_name', 'firmware.zip')
             else:
-                download_url = mirror_result.get('download_url')
+                mirror_download_url = mirror_result.get('download_url')
                 file_name = mirror_result.get('file_name', 'firmware.zip')
             
             await query.edit_message_text(
-                f"🎉 **Firmware Berhasil Diupload!**\n\n"
-                f"• File: `{file_name}`\n"
-                f"• Server: {server_name}\n"
-                f"• Download URL: {download_url}\n\n"
-                f"✅ Proses selesai!",
-                parse_mode='Markdown'
-            )
+                    f"🎉 **Firmware Berhasil Diupload!**\n\n"
+                    f"• File: `{escape_markdown(file_name)}`\n"
+                    f"• Server: {server_name}\n"
+                    f"• Download URL: {escape_markdown(mirror_download_url)}\n\n"
+                    f"✅ Proses selesai!",
+                    parse_mode='Markdown'
+                )
             
         except Exception as e:
             logger.error(f"Error saat memanggil worker mirroring: {e}")
             await query.edit_message_text(
                 f"❌ **Error saat mengupload firmware**\n\n"
-                f"Error: {str(e)}\n\n"
-                f"URL firmware: `{firmware_url}`",
+                f"Error: {escape_markdown(str(e))}\n\n"
+                f"URL firmware: `{context.user_data.get('firmware_url', 'N/A')}`",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
@@ -239,7 +299,7 @@ async def handle_create_fw_server(update: Update, context: ContextTypes.DEFAULT_
         logger.error(f"Error saat memanggil worker firmware creator: {e}")
         await query.edit_message_text(
             f"❌ **Error saat membuat firmware**\n\n"
-            f"Error: {str(e)}",
+            f"Error: {escape_markdown(str(e))}",
             parse_mode='Markdown'
         )
         return ConversationHandler.END
