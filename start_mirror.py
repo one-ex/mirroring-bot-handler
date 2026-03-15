@@ -6,17 +6,6 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
-# Fungsi untuk escape karakter Markdown
-def escape_markdown(text):
-    """Escape karakter khusus Markdown untuk menghindari parsing error."""
-    if not text:
-        return text
-    # Karakter yang perlu di-escape: _ * [ ] ( ) ~ ` > # + - = | { } . !
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
 from config import WEB_AUTH_URL, GDRIVE_API_URL, GOFILE_API_URL, PIXELDRAIN_API_URL, POLLING_INTERVAL, SELECTING_SERVICE
 from utils import check_gdrive_token
 from polling import update_progress
@@ -55,7 +44,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     if service == 'gdrive':
         if not WEB_AUTH_URL:
-            await query.edit_message_text(escape_markdown("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel."))
+            await query.edit_message_text("❌ Fitur Google Drive tidak dikonfigurasi. `WEB_AUTH_URL` tidak disetel.")
             return ConversationHandler.END
 
         has_token = check_gdrive_token(user_id)
@@ -138,10 +127,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     else:
                         logger.info("Polling job 'update_progress' already running")
                 else:
-                    await query.edit_message_text(escape_markdown(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}"))
+                    await query.edit_message_text(f"❌ Gagal memulai mirror GDrive: {result.get('error', 'Kesalahan tidak diketahui')}")
 
             except httpx.RequestError as e:
-                await query.edit_message_text(escape_markdown(f"❌ Gagal terhubung ke layanan mirror GDrive: {e}"))
+                await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror GDrive: {e}")
 
             context.user_data.clear()
             return ConversationHandler.END
@@ -150,7 +139,7 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     api_url = service_map.get(service)
 
     if not api_url:
-        await query.edit_message_text(escape_markdown("❌ Layanan tidak valid."))
+        await query.edit_message_text("❌ Layanan tidak valid.")
         return ConversationHandler.END
 
     try:
@@ -216,10 +205,10 @@ async def start_mirror(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 logger.info("Polling job 'update_progress' already running")
             
         else:
-            await query.edit_message_text(escape_markdown(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}"))
+            await query.edit_message_text(f"❌ Gagal memulai mirror: {result.get('error', 'Kesalahan tidak diketahui')}")
 
     except httpx.RequestError as e:
-        await query.edit_message_text(escape_markdown(f"❌ Gagal terhubung ke layanan mirror: {e}"))
+        await query.edit_message_text(f"❌ Gagal terhubung ke layanan mirror: {e}")
 
     context.user_data.clear()
     return ConversationHandler.END

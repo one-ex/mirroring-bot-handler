@@ -112,59 +112,21 @@ def format_job_progress(job_info: dict, status_info: dict) -> dict:
     file_name_truncated = full_file_name
     if len(file_name_truncated) > 25:
         file_name_truncated = file_name_truncated[:17] + "..."
-    
-    # Cek jika job adalah create_fw
-    is_create_fw = job_info.get('service') == 'create_fw'
-    
-    # Progress Bar - hanya tampilkan untuk status dengan progress
+
+    # Progress Bar
     bar_length = 20
     filled_length = int(bar_length * progress / 100)
     bar = '█' * filled_length + '░' * (bar_length - filled_length)
-    
-    # Format status untuk create_fw
-    if is_create_fw:
-        status_mapping = {
-            'pending': '⏳ Menunggu',
-            'running': '🔄 Berjalan',
-            'downloading': '⬇️ Mengunduh ROM',
-            'creating_firmware': '🔨 Membuat Firmware',
-            'uploading': '⬆️ Mengunggah',
-            'completed': '✅ Selesai',
-            'failed': '❌ Gagal',
-            'cancelled': '🚫 Dibatalkan'
-        }
-        display_status = status_mapping.get(status.lower(), status.capitalize())
-        
-        # Tentukan apakah progress bar ditampilkan
-        # Untuk 'creating_firmware', tidak tampilkan progress bar karena tidak ada informasi progress dari tool
-        show_progress_bar = status.lower() in ['downloading', 'uploading'] and progress > 0
-        
-        text = (
-            f"🔧 **Create Firmware**\n"
-            f"📄  **File Name:** `{file_name_truncated}`\n"
-            f"💾  **Size:** `{size}`\n"
-            f"⚙️  **Status:** `{display_status}`\n"
-        )
-        
-        if show_progress_bar:
-            text += f"〚{bar}〛**{progress:.1f}%**\n"
-            text += f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
-            text += f"⏳  **Estimation:** `{eta} Sec`\n"
-        elif status.lower() == 'creating_firmware':
-            text += f"⏳  Sedang membuat firmware... (Tidak ada informasi progress dari tool)\n"
-        
-        text += f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
-    else:
-        # Job mirroring biasa
-        text = (
-            f"📄  **File Name:** `{file_name_truncated}`\n"
-            f"💾  **Size:** `{size}`\n"
-            f"⚙️  **Status:** `{status}`\n"
-            f"〚{bar}〛**{progress:.1f}%**\n"
-            f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
-            f"⏳  **Estimation:** `{eta} Sec`\n"
-            f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
-        )
+
+    text = (
+        f"📄  **File Name:** `{file_name_truncated}`\n"
+        f"💾  **Size:** `{size}`\n"
+        f"⚙️  **Status:** `{status}`\n"
+        f"〚{bar}〛**{progress:.1f}%**\n"
+        f"🚀  **Speed:** `{speed:.2f} MB/s`\n"
+        f"⏳  **Estimation:** `{eta} Sec`\n"
+        f"🚫  /STOP" + r"\_" + f"{job_id.split('-')[0]}"
+    )
 
     # No more keyboard for active jobs
     keyboard = []

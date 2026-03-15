@@ -76,12 +76,6 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
     all_statuses = {}
     service_urls = {'gofile': GOFILE_API_URL, 'pixeldrain': PIXELDRAIN_API_URL, 'gdrive': GDRIVE_API_URL}
     
-    # Tambahkan URL untuk worker xiaomi-firmware-creator dari environment variable
-    import os
-    CREATE_FW_API_URL = os.getenv('CREATE_FW_API_URL')
-    if CREATE_FW_API_URL:
-        service_urls['create_fw'] = CREATE_FW_API_URL
-    
     tasks = []
     for service, base_url in service_urls.items():
         if not base_url: continue
@@ -130,26 +124,8 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         # Jika pekerjaan tidak lagi dilaporkan oleh server, tentukan status berdasarkan flag internal kita.
         if not status_info:
-            # Untuk job create_fw, coba ambil status langsung dari status_url yang disimpan
-            if job_info.get('service') == 'create_fw' and 'status_url' in job_info:
-                try:
-                    status_response = await async_client.get(job_info['status_url'], timeout=10)
-                    if status_response.status_code == 200:
-                        status_info = status_response.json()
-                        # Tambahkan job_id ke status_info jika tidak ada
-                        if 'job_id' not in status_info:
-                            status_info['job_id'] = job_id
-                    else:
-                        # Jika gagal, gunakan status default
-                        final_status = 'cancelled' if job_info.get('manually_cancelled', False) else 'completed'
-                        status_info = {'status': final_status, 'job_id': job_id}
-                except Exception as e:
-                    logger.warning(f"Failed to fetch status for create_fw job {job_id}: {e}")
-                    final_status = 'cancelled' if job_info.get('manually_cancelled', False) else 'completed'
-                    status_info = {'status': final_status, 'job_id': job_id}
-            else:
-                final_status = 'cancelled' if job_info.get('manually_cancelled', False) else 'completed'
-                status_info = {'status': final_status, 'job_id': job_id}
+            final_status = 'cancelled' if job_info.get('manually_cancelled', False) else 'completed'
+            status_info = {'status': final_status}
         
         # Jika pekerjaan dilaporkan oleh server
         else:
@@ -192,59 +168,6 @@ async def update_progress(context: ContextTypes.DEFAULT_TYPE) -> None:
                     disable_web_page_preview=True,
                     reply_markup=reply_markup
                 )
-                
-                # Jika job create_fw selesai dengan status 'completed', mulai proses upload ke mirroring
-                if job_info.get('service') == 'create_fw' and status_info.get('status') == 'completed':
-                    try:
-                        firmware_url = status_info.get('firmware_download_url') or job_info.get('firmware_download_path')
-                        if firmware_url:
-                            # Simpan firmware_url untuk digunakan di create_fw_handlers
-                            context.user_data['firmware_url'] = firmware_url
-                            
-                            # Panggil worker mirroring untuk mengupload firmware
-                            server = job_info.get('create_fw_server')
-                            server_name = job_info.get('create_fw_server_name', server)
-                            mirror_api_url = job_info.get('mirror_api_url')
-                            
-                            if server in ['gofile', 'pixeldrain']:
-                                mirror_payload = {"url": firmware_url}
-                            elif server == 'gdrive':
-                                mirror_payload = {"url": firmware_url, "user_id": str(user_id)}
-                            else:
-                                logger.error(f"Invalid server for create_fw job {job_id}: {server}")
-                                continue
-                            
-                            # Kirim request ke worker mirroring
-                            mirror_response = await async_client.post(
-                                f"{mirror_api_url}/start",
-                                json=mirror_payload,
-                                timeout=30
-                            )
-                            
-                            if mirror_response.status_code == 200:
-                                mirror_result = mirror_response.json()
-                                mirror_job_id = mirror_result['job_id']
-                                
-                                # Tambahkan job mirroring baru ke active_mirrors
-                                context.bot_data['active_mirrors'][mirror_job_id] = {
-                                    'chat_id': chat_id,
-                                    'user_id': user_id,
-                                    'message_id': job_info['message_id'],  # Gunakan dashboard yang sama
-                                    'file_info': {
-                                        'filename': firmware_url.split('/')[-1],
-                                        'formatted_size': 'N/A',
-                                        'size_bytes': 0
-                                    },
-                                    'service': server,
-                                    'worker': server,
-                                    'username': job_info.get('username', 'N/A'),
-                                    'mirror_api_url': mirror_api_url
-                                }
-                                logger.info(f"Started mirroring job {mirror_job_id} for create_fw job {job_id}")
-                            else:
-                                logger.error(f"Failed to start mirroring for create_fw job {job_id}: {mirror_response.status_code}")
-                    except Exception as e:
-                        logger.error(f"Error starting mirroring for create_fw job {job_id}: {e}")
             except Exception as e:
                 logger.error(f"Failed to send final status for job {job_id} to chat {chat_id}: {e}")
         else:
