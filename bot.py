@@ -36,7 +36,8 @@ from handlers import (
     select_service,
     cancel,
     cancel_gdrive_login,
-    stop_mirror_command_handler
+    stop_mirror_command_handler,
+    handle_create_fw
 )
 
 # Import fungsi-fungsi handler untuk riwayat jobs
